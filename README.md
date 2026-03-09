@@ -28,6 +28,17 @@ A QGIS plugin that generalizes polygon layers by reducing vertices using the Vis
 
 Based on the Visvalingam algorithm from [MapShaper](https://github.com/mbloch/mapshaper), implemented in Python.
 
+## API
+
+You can use the generalization function programmatically:
+
+```python
+from generalize.api import generalize_polygon_layer
+
+layer = iface.activeLayer()  # or any polygon layer
+generalized_layer, orig_count, new_count = generalize_polygon_layer(layer, 50)
+```
+
 ## Testing
 
 Test data is included in `test_data/nad27/popctr_state1970.shp`. Run `test_generalize.py` to test the algorithm.
