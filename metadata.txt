@@ -1,0 +1,12 @@
+[general]
+name=Generalize Polygons
+description=Plugin to generalize polygon layers using Visvalingam algorithm
+version=1.0
+qgisMinimumVersion=3.40
+qgisMaximumVersion=3.99
+author=Your Name
+email=your.email@example.com
+about=This plugin simplifies polygon geometries using the Visvalingam algorithm to reduce vertices while preserving shape.
+
+[processing]
+hasProcessingProvider=no
