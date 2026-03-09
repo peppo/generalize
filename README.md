@@ -45,6 +45,31 @@ Test data is included in `test_data/nad27/popctr_state1970.shp`. Run `test_gener
 
 ## License
 
+[GNU General Public License v3.0](LICENSE)
+
+## Initial Prompt
+
+This should become a QGIS plugin in Python that generalizes a polygon layer. The vertices of the polygons are reduced so that less memory is used. The shape should be preserved as much as possible and there should be no gaps or overlaps between the polygons.
+
+There is a JavaScript project at https://github.com/mbloch/mapshaper  
+MapShaper uses the "Visvalingam/weighted area" algorithm which produces very good results. I want to make this algorithm available in QGIS as a plugin so that it can be used and called there. The algorithm is in mapshaper\src\simplify\mapshaper-visvalingam.mjs and should be rebuilt in Python.
+
+When the plugin is called from the interface, a dialog should open. There you can select a layer loaded in QGIS. There is also a slider to set by how much percent (100%-0%) the number of points should be reduced.
+
+In the directory workspace/verwaltungsgrenzen there are sample data that I want to generalize. These can be used as test data. Smaller test data is also under mapshaper\test\data\shapefile\nad27\popctr_state1970.shp
+
+Steps:  
+1. Create a minimal QGIS plugin  
+2. Create the dialog  
+3. Load a dropdown with the layers  
+4. Write code for preparing the data from the layer and subsequently applying the Visvalingam algorithm  
+5. The output occurs in a new in-memory layer in QGIS  
+
+The new plugin should be created in the generalize directory. The mapshaper directory is only a template. Feel free to look around there.  
+The steps are a suggestion, but decide yourself. Let's talk about it before you start.
+
+## License
+
 [MIT License](LICENSE) - Add a LICENSE file if needed.
 
 ## Contributing
