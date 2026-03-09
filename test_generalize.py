@@ -13,7 +13,7 @@ app = QApplication([])
 QgsApplication.initQgis()
 
 # Load test data
-layer_path = r'd:\dev\workspace\mapshaper\test\data\shapefile\nad27\popctr_state1970.shp'
+layer_path = os.path.join(os.path.dirname(__file__), 'test_data', 'nad27', 'popctr_state1970.shp')
 layer = QgsVectorLayer(layer_path, 'test_layer', 'ogr')
 if not layer.isValid():
     print("Layer failed to load!")
