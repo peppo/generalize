@@ -1,82 +1,72 @@
-from qgis.core import QgsVectorLayer, QgsFeature, QgsGeometry, QgsWkbTypes, QgsPointXY, QgsProject
-from .visvalingam import simplify_polygon
-import numpy as np
+from qgis.core import QgsVectorLayer, QgsWkbTypes, QgsProject
+
+from .topology_builder import build, to_qgs_features
+from .visvalingam import simplify_arc, simplify_polygon
 
 
 def generalize_polygon_layer(input_layer, percentage, output_layer=None, progress_callback=None):
     """
-    Generalize a polygon layer using the Visvalingam algorithm.
+    Generalize a polygon layer using the topological Visvalingam algorithm.
 
-    :param input_layer: QgsVectorLayer - The input polygon layer
-    :param percentage: int - Reduction percentage (0-100)
-    :param output_layer: str or None - Path to output shapefile, or None for in-memory layer
-    :param progress_callback: callable - Function to call with (current, total) for progress
-    :return: tuple - (QgsVectorLayer, original_count, new_count)
+    Shared borders between adjacent polygons are simplified exactly once,
+    so both neighbours always receive the same simplified edge — no slivers.
+
+    :param input_layer:      QgsVectorLayer – the input polygon layer
+    :param percentage:       int – reduction percentage (0–100)
+    :param output_layer:     str or None – path to output shapefile (not yet implemented)
+    :param progress_callback: callable(current, total) → bool
+                              Called once per edge.  Return True to cancel.
+    :return: (QgsVectorLayer, original_feature_count, new_feature_count)
     """
-    if not isinstance(input_layer, QgsVectorLayer) or input_layer.geometryType() != QgsWkbTypes.PolygonGeometry:
+    if not isinstance(input_layer, QgsVectorLayer) \
+            or input_layer.geometryType() != QgsWkbTypes.PolygonGeometry:
         raise ValueError("Input must be a polygon vector layer")
 
     if output_layer:
         raise NotImplementedError("File output not yet implemented. Use None for in-memory.")
 
-    # In-memory layer
-    new_layer = QgsVectorLayer('Polygon?crs=' + input_layer.crs().authid(), f'{input_layer.name()}_generalized', 'memory')
+    original_count = input_layer.featureCount()
+
+    # --- 1. Build topology ---
+    topo = build(input_layer)
+    edges = list(topo.edges.values())
+    total_edges = len(edges)
+
+    # --- 2. Simplify every edge exactly once ---
+    for i, edge in enumerate(edges):
+        if progress_callback and progress_callback(i, total_edges):
+            return None, original_count, 0   # cancelled
+
+        is_loop = (edge.start_node == edge.end_node)
+        if is_loop:
+            # Closed ring stored as a loop arc (first coord == last coord).
+            # Use simplify_polygon so the polygon minimum of 4 points applies.
+            edge.coords = simplify_polygon(edge.coords, percentage)
+        else:
+            # Open arc between two distinct junction nodes.
+            edge.coords = simplify_arc(edge.coords, percentage)
+
+    if progress_callback:
+        progress_callback(total_edges, total_edges)
+
+    # --- 3. Reconstruct QgsFeatures from the simplified topology ---
+    new_layer = QgsVectorLayer(
+        'Polygon?crs=' + input_layer.crs().authid(),
+        f'{input_layer.name()}_generalized',
+        'memory',
+    )
     new_layer.setCrs(input_layer.crs())
     new_layer.dataProvider().addAttributes(input_layer.fields())
     new_layer.updateFields()
 
-    features = list(input_layer.getFeatures())
-    total_features = len(features)
-    original_count = total_features
     new_count = 0
-
-    for i, feature in enumerate(features):
-        if progress_callback and progress_callback(i, total_features):
-            break  # Cancelled
-
-        geom = feature.geometry()
-        if geom.isMultipart():
-            parts = []
-            for part in geom.asMultiPolygon():
-                simplified = _simplify_geometry(part, percentage)
-                if simplified:
-                    parts.append(simplified)
-            if parts:
-                new_geom = QgsGeometry.fromMultiPolygonXY(parts)
-            else:
-                continue
-        else:
-            simplified = _simplify_geometry(geom.asPolygon(), percentage)
-            if simplified:
-                new_geom = QgsGeometry.fromPolygonXY(simplified)
-            else:
-                continue
-
-        new_feature = QgsFeature()
-        new_feature.setGeometry(new_geom)
-        new_feature.setAttributes(feature.attributes())
-        new_layer.dataProvider().addFeature(new_feature)
+    for feat in to_qgs_features(topo):
+        geom = feat.geometry()
+        # Skip polygons that collapsed to nothing after simplification.
+        if geom.isNull() or geom.isEmpty() or geom.area() <= 0:
+            continue
+        new_layer.dataProvider().addFeature(feat)
         new_count += 1
 
-    if progress_callback:
-        progress_callback(total_features, total_features)
-
-    # Add to project
     QgsProject.instance().addMapLayer(new_layer)
-
     return new_layer, original_count, new_count
-
-
-def _simplify_geometry(polygon, percentage):
-    if not polygon:
-        return None
-    outer_ring = polygon[0]
-    if len(outer_ring) < 4:
-        return polygon
-
-    coords = np.array([(p.x(), p.y()) for p in outer_ring])
-    simplified_coords = simplify_polygon(coords, percentage)
-    if len(simplified_coords) < 4:
-        return None
-    simplified_ring = [QgsPointXY(x, y) for x, y in simplified_coords]
-    return [simplified_ring] + polygon[1:]
