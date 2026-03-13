@@ -2,7 +2,7 @@
 Performance benchmark for the topological generalisation pipeline.
 
 Run:
-    "C:\\Program Files\\QGIS 3.40.15\\apps\\Python312\\python.exe" benchmark.py
+    "C:\\Program Files\\QGIS 3.40.15\\apps\\Python312\\python.exe" tests/benchmark.py
 """
 import os
 import sys
@@ -11,8 +11,12 @@ import time
 # ---------------------------------------------------------------------------
 # Bootstrap QGIS
 # ---------------------------------------------------------------------------
-_HERE = os.path.dirname(os.path.abspath(__file__))
-_WORKSPACE = os.path.dirname(_HERE)
+_HERE     = os.path.dirname(os.path.abspath(__file__))  # .../generalize/tests
+_PKG_ROOT = os.path.dirname(_HERE)                       # .../generalize
+_WORKSPACE = os.path.dirname(_PKG_ROOT)                  # .../workspace
+
+if _PKG_ROOT not in sys.path:
+    sys.path.insert(0, _PKG_ROOT)
 if _WORKSPACE not in sys.path:
     sys.path.insert(0, _WORKSPACE)
 
@@ -43,7 +47,7 @@ def main():
     from generalize.visvalingam import simplify_arc, simplify_polygon
 
     shp = os.path.join(
-        _HERE, 'test_data', 'verwaltungsgrenzen_vermessung', 'VerwaltungsEinheit.shp'
+        _PKG_ROOT, 'test_data', 'gemeinden_bayern', 'VerwaltungsEinheit.shp'
     )
 
     _hline()

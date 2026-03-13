@@ -4,10 +4,10 @@ and verify that feature count, attributes, and geometries are preserved exactly.
 
 Run from the command line (no QGIS GUI required):
     cd d:\\dev\\workspace\\generalize
-    "C:\\Program Files\\QGIS 3.40.15\\apps\\Python312\\python.exe" -m pytest test_topology.py -v
+    "C:\\Program Files\\QGIS 3.40.15\\apps\\Python312\\python.exe" -m pytest tests/test_topology.py -v
 
 Or as a plain script:
-    "C:\\Program Files\\QGIS 3.40.15\\apps\\Python312\\python.exe" test_topology.py
+    "C:\\Program Files\\QGIS 3.40.15\\apps\\Python312\\python.exe" tests/test_topology.py
 """
 import os
 import sys
@@ -16,10 +16,15 @@ import unittest
 # ---------------------------------------------------------------------------
 # Bootstrap – must happen before any qgis.* import
 # ---------------------------------------------------------------------------
-_HERE = os.path.dirname(os.path.abspath(__file__))
-_WORKSPACE = os.path.dirname(_HERE)            # d:\dev\workspace
+_HERE     = os.path.dirname(os.path.abspath(__file__))  # .../generalize/tests
+_PKG_ROOT = os.path.dirname(_HERE)                       # .../generalize
+_WORKSPACE = os.path.dirname(_PKG_ROOT)                  # .../workspace
 
-# Make the generalize package importable as 'generalize.xxx'
+# qgis_init lives in the package root
+if _PKG_ROOT not in sys.path:
+    sys.path.insert(0, _PKG_ROOT)
+
+# generalize package is importable from the workspace root
 if _WORKSPACE not in sys.path:
     sys.path.insert(0, _WORKSPACE)
 
@@ -29,9 +34,9 @@ import qgis_init  # noqa: E402  (must come after sys.path setup)
 # ---------------------------------------------------------------------------
 # Test data
 # ---------------------------------------------------------------------------
-_DATA_ROOT = os.path.join(_HERE, 'test_data')
+_DATA_ROOT = os.path.join(_PKG_ROOT, 'test_data')
 
-_SHP = os.path.join(_DATA_ROOT, 'verwaltungsgrenzen_vermessung', 'VerwaltungsEinheit.shp')
+_SHP = os.path.join(_DATA_ROOT, 'gemeinden_bayern', 'VerwaltungsEinheit.shp')
 
 
 # ---------------------------------------------------------------------------
