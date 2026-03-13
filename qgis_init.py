@@ -33,6 +33,7 @@ def _bootstrap():
     # --- sys.path ---
     for p in [
         os.path.join(_APP, 'python'),                       # qgis bindings
+        os.path.join(_APP, 'python', 'plugins'),            # processing etc.
         os.path.join(_PYTHON, 'Lib', 'site-packages'),      # numpy etc.
     ]:
         if os.path.isdir(p) and p not in sys.path:
@@ -70,6 +71,10 @@ def _start_qgis():
     _qgs_instance = QgsApplication([], False)
     QgsApplication.setPrefixPath(_APP, True)
     _qgs_instance.initQgis()
+
+    # Register native algorithms so that `import processing` works outside GUI.
+    from qgis.analysis import QgsNativeAlgorithms  # noqa: PLC0415
+    QgsApplication.processingRegistry().addProvider(QgsNativeAlgorithms())
 
 
 # ---------------------------------------------------------------------------

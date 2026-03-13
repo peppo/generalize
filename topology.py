@@ -112,6 +112,25 @@ class TopoRing:
             pts.append(pts[0])
         return pts
 
+    def iter_coords_numpy(self, edges: dict[int, TopoEdge]) -> np.ndarray:
+        """
+        Reconstruct the ring as a closed numpy array of shape (n, 2).
+
+        The last row equals the first row (closing duplicate included).
+        No Python tuples are created; all work stays in numpy.
+        Used by the fast WKB geometry reconstruction path.
+        """
+        parts = []
+        for edge_id, forward in self.half_edges:
+            seg = edges[edge_id].coords          # (m, 2) numpy array
+            if not forward:
+                seg = seg[::-1]                  # reversed view, no copy
+            parts.append(seg[:-1])               # all but the junction point
+        if not parts:
+            return np.empty((0, 2), dtype=np.float64)
+        coords = np.vstack(parts)                # (k, 2)
+        return np.vstack([coords, coords[:1]])   # close the ring
+
 
 # ---------------------------------------------------------------------------
 # Polygons
@@ -197,7 +216,7 @@ class TopoLayer:
     )
 
     # snap tolerance used during construction (units of the CRS)
-    snap_tolerance: float = 1e-8
+    snap_tolerance: float = 0
 
     # -----------------------------------------------------------------------
     # Convenience / stats

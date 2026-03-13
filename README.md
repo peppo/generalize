@@ -13,7 +13,7 @@ A QGIS plugin that generalizes polygon layers by reducing vertices using the Vis
 ## Installation
 
 1. Download or clone this repository
-2. Copy the `generalize` folder to your QGIS plugins directory (e.g., `C:\Users\<username>\AppData\Roaming\QGIS\QGIS3\profiles\default\python\plugins\`)
+2. Link the folder `C:\Users\<username>\AppData\Roaming\QGIS\QGIS3\profiles\default\python\plugins\` to your workspace 
 3. Restart QGIS or reload plugins
 4. Enable the plugin in the Plugin Manager
 
@@ -41,7 +41,18 @@ generalized_layer, orig_count, new_count = generalize_polygon_layer(layer, 50)
 
 ## Testing
 
-Test data is included in `test_data/nad27/popctr_state1970.shp`. Run `test_generalize.py` to test the algorithm.
+Run the integration tests (QGIS must be installed at `C:\Program Files\QGIS 3.40.15`):
+
+```
+"C:\Program Files\QGIS 3.40.15\apps\Python312\python.exe" generalize/test_topology.py
+```
+
+**Test data** is not included in this repository due to file size.  Download one of the following and place it at `generalize/test_data/verwaltungsgrenzen_vermessung/VerwaltungsEinheit.shp`:
+
+- **Verwaltungsgebiete 1:25 000** (BKG, Germany-wide):
+  https://gdz.bkg.bund.de/index.php/default/digitale-geodaten/verwaltungsgebiete/verwaltungsgebiete-1-25-000-stand-31-12-vg25.html
+- **Verwaltung Bayern OpenData** (Bavaria only):
+  https://geodaten.bayern.de/opengeodata/OpenDataDetail.html?pn=verwaltung
 
 ## License
 
@@ -56,7 +67,7 @@ MapShaper uses the "Visvalingam/weighted area" algorithm which produces very goo
 
 When the plugin is called from the interface, a dialog should open. There you can select a layer loaded in QGIS. There is also a slider to set by how much percent (100%-0%) the number of points should be reduced.
 
-In the directory workspace/verwaltungsgrenzen there are sample data that I want to generalize. These can be used as test data. Smaller test data is also under mapshaper\test\data\shapefile\nad27\popctr_state1970.shp
+In the directory generalize/test_data/verwaltungsgrenzen there is sample data that I want to generalize. 
 
 Steps:  
 1. Create a minimal QGIS plugin  
@@ -68,9 +79,12 @@ Steps:
 The new plugin should be created in the generalize directory. The mapshaper directory is only a template. Feel free to look around there.  
 The steps are a suggestion, but decide yourself. Let's talk about it before you start.
 
+## More Prompt
+Lets continue to work on the generalize project. We need to do some refacting, because it produces slivers (gaps) between the polygons. When the layer is loaded, we want to read all the features and store them in a data class, which hold the polygons in a topological manner. When polygons share a border, there must be only one representation for the line with the common points. Create the datastructure which shall hold the topological polygons and explain what you did. Ask questions if unclear.
+
 ## License
 
-[MIT License](LICENSE) - Add a LICENSE file if needed.
+GNU LICENSE
 
 ## Contributing
 

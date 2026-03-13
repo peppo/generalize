@@ -1,10 +1,16 @@
 from qgis.core import QgsVectorLayer, QgsWkbTypes, QgsProject
 
-from .topology_builder import build, to_qgs_features
+from .topology_builder import build, remove_collinear_vertices, snap_to_self, to_qgs_features
 from .visvalingam import simplify_arc, simplify_polygon
 
 
-def generalize_polygon_layer(input_layer, percentage, output_layer=None, progress_callback=None):
+def generalize_polygon_layer(
+    input_layer,
+    percentage,
+    output_layer=None,
+    progress_callback=None,
+    snap_tolerance: float = 1.0,
+):
     """
     Generalize a polygon layer using the topological Visvalingam algorithm.
 
@@ -16,6 +22,11 @@ def generalize_polygon_layer(input_layer, percentage, output_layer=None, progres
     :param output_layer:     str or None – path to output shapefile (not yet implemented)
     :param progress_callback: callable(current, total) → bool
                               Called once per edge.  Return True to cancel.
+    :param snap_tolerance:   float – vertices within this distance (map units) are
+                              snapped together before topology is built, repairing
+                              small gaps in the source data.  Set to 0 to skip
+                              pre-processing (only safe when source polygons are
+                              already topologically perfect).
     :return: (QgsVectorLayer, original_feature_count, new_feature_count)
     """
     if not isinstance(input_layer, QgsVectorLayer) \
@@ -27,12 +38,16 @@ def generalize_polygon_layer(input_layer, percentage, output_layer=None, progres
 
     original_count = input_layer.featureCount()
 
-    # --- 1. Build topology ---
-    topo = build(input_layer)
+    # --- 1. Pre-process: remove collinear (180-degree) vertices so shared
+    #        borders have identical coordinate sequences in both polygons. ---
+    layer = remove_collinear_vertices(input_layer) if snap_tolerance > 0 else input_layer
+
+    # --- 2. Build topology ---
+    topo = build(layer)
     edges = list(topo.edges.values())
     total_edges = len(edges)
 
-    # --- 2. Simplify every edge exactly once ---
+    # --- 3. Simplify every edge exactly once ---
     for i, edge in enumerate(edges):
         if progress_callback and progress_callback(i, total_edges):
             return None, original_count, 0   # cancelled
@@ -49,7 +64,7 @@ def generalize_polygon_layer(input_layer, percentage, output_layer=None, progres
     if progress_callback:
         progress_callback(total_edges, total_edges)
 
-    # --- 3. Reconstruct QgsFeatures from the simplified topology ---
+    # --- 4. Reconstruct QgsFeatures from the simplified topology ---
     new_layer = QgsVectorLayer(
         'Polygon?crs=' + input_layer.crs().authid(),
         f'{input_layer.name()}_generalized',

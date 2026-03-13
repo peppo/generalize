@@ -110,6 +110,9 @@ dmypy.json
 *.qgs~
 *.qgz~
 
+# Test data (large shapefiles – download separately, see README)
+test_data/
+
 # OS specific
 .DS_Store
 Thumbs.db
