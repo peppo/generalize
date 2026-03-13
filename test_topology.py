@@ -277,15 +277,13 @@ class TestTopologicalGeneralization(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        from generalize.topology_builder import build, snap_to_self
+        from generalize.topology_builder import build
         from generalize.visvalingam import simplify_arc, simplify_polygon
 
         cls.layer = _load_layer(_SHP)
-        # Pre-process: snap adjacent boundaries so shared borders are identical.
-        # This repairs the common cadastral-data pattern where adjacent polygons
-        # represent the same boundary with slightly different coordinates.
-        snapped = snap_to_self(cls.layer, tolerance=1.0)
-        topo = build(snapped)
+        # The test data is topologically perfect (exact coordinate matches).
+        # Build topology directly — no snap preprocessing needed.
+        topo = build(cls.layer)
 
         for edge in topo.edges.values():
             is_loop = (edge.start_node == edge.end_node)
@@ -435,12 +433,11 @@ class TestGeneralizationQuality(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        from generalize.topology_builder import build, snap_to_self
+        from generalize.topology_builder import build
         from generalize.visvalingam import simplify_arc, simplify_polygon
 
         cls.layer = _load_layer(_SHP)
-        snapped = snap_to_self(cls.layer, tolerance=1.0)
-        topo = build(snapped)
+        topo = build(cls.layer)
 
         for edge in topo.edges.values():
             is_loop = (edge.start_node == edge.end_node)

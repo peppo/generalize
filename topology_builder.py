@@ -590,14 +590,48 @@ def _canonicalize(arc_coords: list[tuple]) -> tuple[list[tuple], bool]:
     """
     Return ``(canonical_coords, is_forward)``.
 
-    The canonical form puts the lexicographically-smaller endpoint first,
-    ensuring the same arc traversed in opposite directions by two polygons
-    produces the same lookup key.
+    For **open arcs** (first != last): the canonical form puts the
+    lexicographically-smaller endpoint first.
+
+    For **loop arcs** (first == last, entire ring = one arc): the canonical
+    form is the lexicographically-smaller of the minimum-rotation forward form
+    and the minimum-rotation reversed form.  This is necessary because an outer
+    ring (CCW) and an inner ring (CW hole) traverse the same loop arc in
+    opposite directions; without this normalisation both would produce different
+    tuple keys and the shared edge would not be detected.
+
+    ``is_forward=True``  means arc_coords traverses the canonical arc in the
+                         same cyclic direction (ignoring start vertex).
+    ``is_forward=False`` means arc_coords is the cyclic reversal of the
+                         canonical arc.
     """
     first, last = arc_coords[0], arc_coords[-1]
-    if first <= last:
+
+    if first != last:
+        # Open arc: smaller endpoint goes first.
+        if first <= last:
+            return arc_coords, True
+        return list(reversed(arc_coords)), False
+
+    # Loop arc: choose canonical form as the lex-min of all rotations of both
+    # the forward and reversed traversals.
+    body = arc_coords[:-1]          # strip closing duplicate; n unique vertices
+    n = len(body)
+    if n == 0:
         return arc_coords, True
-    return list(reversed(arc_coords)), False
+
+    # Minimum-rotation of forward traversal
+    fwd_start = min(range(n), key=lambda i: body[i:] + body[:i])
+    fwd = body[fwd_start:] + body[:fwd_start]
+
+    # Minimum-rotation of reversed traversal
+    rev_body = list(reversed(body))
+    rev_start = min(range(n), key=lambda i: rev_body[i:] + rev_body[:i])
+    rev = rev_body[rev_start:] + rev_body[:rev_start]
+
+    if fwd <= rev:
+        return fwd + [fwd[0]], True
+    return rev + [rev[0]], False
 
 
 def _get_or_create_node(topo: TopoLayer, coord: tuple) -> int:

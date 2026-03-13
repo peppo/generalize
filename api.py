@@ -9,7 +9,7 @@ def generalize_polygon_layer(
     percentage,
     output_layer=None,
     progress_callback=None,
-    snap_tolerance: float = 1.0,
+    snap_tolerance: float = 0.0,
 ):
     """
     Generalize a polygon layer using the topological Visvalingam algorithm.
@@ -22,11 +22,11 @@ def generalize_polygon_layer(
     :param output_layer:     str or None – path to output shapefile (not yet implemented)
     :param progress_callback: callable(current, total) → bool
                               Called once per edge.  Return True to cancel.
-    :param snap_tolerance:   float – vertices within this distance (map units) are
-                              snapped together before topology is built, repairing
-                              small gaps in the source data.  Set to 0 to skip
-                              pre-processing (only safe when source polygons are
-                              already topologically perfect).
+    :param snap_tolerance:   float – when > 0, run remove_collinear_vertices()
+                              before building topology.  Use this when the source
+                              data has intermediate collinear vertices that prevent
+                              shared-edge detection.  Default 0 (no preprocessing)
+                              is correct for topologically perfect input.
     :return: (QgsVectorLayer, original_feature_count, new_feature_count)
     """
     if not isinstance(input_layer, QgsVectorLayer) \
