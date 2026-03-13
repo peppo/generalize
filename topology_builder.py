@@ -442,19 +442,37 @@ def _build_topology(
                     sharing.append(frozenset(rings_here - {ring_id}))
 
         # An arc boundary is a position where the sharing value changes,
-        # UNLESS the change is a pure "narrowing" — i.e. we are leaving an
-        # n-way junction and the current partners are a strict subset of the
-        # previous partners.  At such a transition the ring is simply losing
-        # one transient neighbour; the arc with the remaining partner(s)
-        # started at the n-way junction itself, not one step later.
-        # Suppressing these transitions ensures that rings on both sides of
-        # a shared boundary place the arc endpoint AT the n-way junction,
-        # producing matching canonical keys and a detected shared edge.
-        arc_starts = [
+        # subject to two adjustments:
+        #
+        # 1. Narrowing suppression (n-way junctions): when the current sharing
+        #    partners are a strict subset of the previous partners the ring is
+        #    leaving an n-way junction — the arc with the remaining partner(s)
+        #    began at that junction, not one step later.  Suppressing these
+        #    transitions ensures matching canonical keys.
+        #
+        # 2. SHARED→UNSHARED shift: when a shared section ends and the next
+        #    coordinate is unshared, the arc_start is normally placed at the
+        #    first unshared coord, which becomes the arc endpoint (included by
+        #    _split_into_arcs).  The adjacent ring traversing the same boundary
+        #    in the opposite direction sees UNSHARED→SHARED and places its
+        #    arc_start at the first *shared* coord — one position earlier.
+        #    The two arcs therefore have different lengths and keys don't match.
+        #    Fix: move the arc_start for SHARED→UNSHARED transitions back one
+        #    position to the *last shared coord*.  The shared arc then ends at
+        #    the last shared coord, which is the same coord where the adjacent
+        #    ring starts its matching arc.
+        raw_arc_starts = [
             i for i in range(n)
             if sharing[i] != sharing[(i - 1) % n]
             and not _sharing_narrows(sharing[i], sharing[(i - 1) % n])
         ]
+        arc_starts = []
+        for i in raw_arc_starts:
+            if sharing[i] == _UNSHARED and sharing[(i - 1) % n] != _UNSHARED:
+                arc_starts.append((i - 1) % n)
+            else:
+                arc_starts.append(i)
+        arc_starts = sorted(set(arc_starts))
 
         arcs = _split_into_arcs(coords, arc_starts)
 
