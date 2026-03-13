@@ -4,8 +4,8 @@ description=Plugin to generalize polygon layers using Visvalingam algorithm
 version=1.0
 qgisMinimumVersion=3.40
 qgisMaximumVersion=3.99
-author=Your Name
-email=your.email@example.com
+author=Peppo Herney
+email=peppo.herney@gmx.de
 about=This plugin simplifies polygon geometries using the Visvalingam algorithm to reduce vertices while preserving shape.
 
 [processing]

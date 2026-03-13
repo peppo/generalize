@@ -441,10 +441,19 @@ def _build_topology(
                 else:
                     sharing.append(frozenset(rings_here - {ring_id}))
 
-        # An arc boundary is a position where the sharing value changes.
+        # An arc boundary is a position where the sharing value changes,
+        # UNLESS the change is a pure "narrowing" — i.e. we are leaving an
+        # n-way junction and the current partners are a strict subset of the
+        # previous partners.  At such a transition the ring is simply losing
+        # one transient neighbour; the arc with the remaining partner(s)
+        # started at the n-way junction itself, not one step later.
+        # Suppressing these transitions ensures that rings on both sides of
+        # a shared boundary place the arc endpoint AT the n-way junction,
+        # producing matching canonical keys and a detected shared edge.
         arc_starts = [
             i for i in range(n)
             if sharing[i] != sharing[(i - 1) % n]
+            and not _sharing_narrows(sharing[i], sharing[(i - 1) % n])
         ]
 
         arcs = _split_into_arcs(coords, arc_starts)
@@ -509,6 +518,29 @@ def _build_topology(
 # ---------------------------------------------------------------------------
 # Arc helpers
 # ---------------------------------------------------------------------------
+
+def _sharing_narrows(curr, prev) -> bool:
+    """Return True if the current sharing partners are a strict subset of the
+    previous sharing partners.
+
+    This happens when a ring leaves an n-way junction and re-enters a region
+    shared with fewer neighbours.  Example: a ring transitions from
+    frozenset({A, B}) (3-way junction) to just A (2-way shared with A).
+    The arc with partner A began at the n-way junction, not one step later,
+    so the transition coord should NOT open a new arc.
+
+    The check handles all n ≥ 2 because frozenset strict-subset comparison is
+    used regardless of how many rings meet at the junction.
+
+    ``_UNSHARED`` (0) is treated as "no partners" and never counts as a
+    subset, so entering unshared territory always starts a new arc.
+    """
+    if curr == _UNSHARED or prev == _UNSHARED:
+        return False
+    curr_set = curr if isinstance(curr, frozenset) else frozenset({curr})
+    prev_set = prev if isinstance(prev, frozenset) else frozenset({prev})
+    return curr_set < prev_set   # strict subset: curr lost some partners
+
 
 def _split_into_arcs(
     coords: list[tuple],
