@@ -1,6 +1,4 @@
-from qgis.PyQt.QtCore import QCoreApplication
 from qgis.PyQt.QtWidgets import QAction
-from qgis.core import QgsApplication
 from .generalize_dialog import GeneralizeDialog
 import os.path
 
@@ -13,10 +11,10 @@ class GeneralizePlugin:
     def initGui(self):
         self.action = QAction('Generalize Polygons', self.iface.mainWindow())
         self.action.triggered.connect(self.run)
-        self.iface.addPluginToMenu('&Generalize', self.action)
+        self.iface.vectorMenu().addAction(self.action)
 
     def unload(self):
-        self.iface.removePluginMenu('&Generalize', self.action)
+        self.iface.vectorMenu().removeAction(self.action)
 
     def run(self):
         dialog = GeneralizeDialog(self.iface)
