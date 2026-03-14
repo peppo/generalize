@@ -1,91 +1,70 @@
-# Generalize Polygons QGIS Plugin
+# Generalize Polygons — QGIS Plugin
 
-A QGIS plugin that generalizes polygon layers by reducing vertices using the Visvalingam algorithm, preserving shape while reducing storage.
+Topology-preserving polygon simplification using the weighted Visvalingam-Whyatt algorithm. Reduces vertex count while guaranteeing no slivers, gaps, or overlaps between adjacent polygons.
 
 ## Features
 
-- Simplifies polygon geometries using the weighted Visvalingam algorithm
-- Preserves shape and avoids gaps or overlaps
-- Interactive dialog to select layers and set reduction percentage
-- Outputs to a new in-memory layer
-- Progress bar with cancel option for long operations
+- **Topology-preserving** — shared borders between adjacent polygons are simplified exactly once, so both neighbours always receive the same simplified edge. No slivers, no gaps.
+- **Weighted Visvalingam-Whyatt algorithm** — the same algorithm used by [MapShaper](https://github.com/mbloch/mapshaper). Triangle areas are weighted by the angle at the centre vertex, so nearly-collinear points are removed first while geometrically significant vertices are protected.
+- **Geometry validity check** — the input layer is checked for invalid geometries before processing. Invalid features are rejected with a clear error message.
+- **Optional geometry repair** — if the output contains invalid geometries, the built-in QGIS *Fix Geometries* tool is applied automatically and the repaired layer is added to the project alongside the generalized one.
+- **Background processing** — runs as a QGIS background task so the interface stays responsive. A progress bar tracks the three internal phases (topology build, simplification, reconstruction) and the task can be cancelled at any time.
 
 ## Installation
 
-1. Download or clone this repository
-2. Link the folder `C:\Users\<username>\AppData\Roaming\QGIS\QGIS3\profiles\default\python\plugins\` to your workspace 
-3. Restart QGIS or reload plugins
-4. Enable the plugin in the Plugin Manager
+### From ZIP (recommended)
+
+1. Download the latest `generalize-<version>.zip` from the [Releases](https://github.com/peppo/generalize/releases) page
+2. In QGIS: **Plugins → Manage and Install Plugins → Install from ZIP**
+3. Select the downloaded zip and click *Install Plugin*
+
+### From source (development)
+
+1. Clone this repository into your QGIS plugin folder:
+   ```
+   cd %APPDATA%\QGIS\QGIS3\profiles\default\python\plugins
+   git clone https://github.com/peppo/generalize.git
+   ```
+2. Restart QGIS and enable the plugin in the Plugin Manager
 
 ## Usage
 
 1. Load a polygon layer in QGIS
-2. Go to Plugins > Generalize > Generalize Polygons
-3. Select the layer and set the reduction percentage (0-100%)
-4. Click OK to create a generalized in-memory layer
-
-## Algorithm
-
-Based on the Visvalingam algorithm from [MapShaper](https://github.com/mbloch/mapshaper), implemented in Python.
+2. Go to **Vector → Generalize Polygons…**
+3. Select the layer and set the reduction percentage (0–100 %)
+4. Optionally check *Repair geometry if necessary*
+5. Click **OK** — the generalized layer is added to the project when done
 
 ## API
 
-You can use the generalization function programmatically:
+The generalization function can also be called from the QGIS Python console or another plugin:
 
 ```python
 from generalize.api import generalize_polygon_layer
 
-layer = iface.activeLayer()  # or any polygon layer
+layer = iface.activeLayer()  # or any polygon vector layer
 generalized_layer, orig_count, new_count = generalize_polygon_layer(layer, 50)
 ```
 
-## Testing
+## Development & Testing
 
-Run the integration tests (QGIS must be installed at `C:\Program Files\QGIS 3.40.15`):
+Run the integration tests (requires QGIS 3.40 installed at the default path):
 
 ```
-"C:\Program Files\QGIS 3.40.15\apps\Python312\python.exe" generalize/test_topology.py
+"C:\Program Files\QGIS 3.40.15\apps\Python312\python.exe" generalize/tests/test_topology.py
 ```
 
-**Test data** is not included in this repository due to file size.  Download one of the following and place it at `generalize/test_data/verwaltungsgrenzen_vermessung/VerwaltungsEinheit.shp`:
+**Test data** is not included in this repository due to file size. Download one of the following and place it at `generalize/test_data/verwaltungsgrenzen_vermessung/VerwaltungsEinheit.shp`:
 
 - **Verwaltungsgebiete 1:25 000** (BKG, Germany-wide):
   https://gdz.bkg.bund.de/index.php/default/digitale-geodaten/verwaltungsgebiete/verwaltungsgebiete-1-25-000-stand-31-12-vg25.html
 - **Verwaltung Bayern OpenData** (Bavaria only):
   https://geodaten.bayern.de/opengeodata/OpenDataDetail.html?pn=verwaltung
 
+## Contributing
+
+Bug reports and pull requests are welcome on the [issue tracker](https://github.com/peppo/generalize/issues).
+
 ## License
 
 [GNU General Public License v3.0](LICENSE)
-
-## Initial Prompt
-
-This should become a QGIS plugin in Python that generalizes a polygon layer. The vertices of the polygons are reduced so that less memory is used. The shape should be preserved as much as possible and there should be no gaps or overlaps between the polygons.
-
-There is a JavaScript project at https://github.com/mbloch/mapshaper  
-MapShaper uses the "Visvalingam/weighted area" algorithm which produces very good results. I want to make this algorithm available in QGIS as a plugin so that it can be used and called there. The algorithm is in mapshaper\src\simplify\mapshaper-visvalingam.mjs and should be rebuilt in Python.
-
-When the plugin is called from the interface, a dialog should open. There you can select a layer loaded in QGIS. There is also a slider to set by how much percent (100%-0%) the number of points should be reduced.
-
-In the directory generalize/test_data/verwaltungsgrenzen there is sample data that I want to generalize. 
-
-Steps:  
-1. Create a minimal QGIS plugin  
-2. Create the dialog  
-3. Load a dropdown with the layers  
-4. Write code for preparing the data from the layer and subsequently applying the Visvalingam algorithm  
-5. The output occurs in a new in-memory layer in QGIS  
-
-The new plugin should be created in the generalize directory. The mapshaper directory is only a template. Feel free to look around there.  
-The steps are a suggestion, but decide yourself. Let's talk about it before you start.
-
-## More Prompt
-Lets continue to work on the generalize project. We need to do some refacting, because it produces slivers (gaps) between the polygons. When the layer is loaded, we want to read all the features and store them in a data class, which hold the polygons in a topological manner. When polygons share a border, there must be only one representation for the line with the common points. Create the datastructure which shall hold the topological polygons and explain what you did. Ask questions if unclear.
-
-## License
-
-GNU LICENSE
-
-## Contributing
-
-Feel free to open issues or pull requests.
