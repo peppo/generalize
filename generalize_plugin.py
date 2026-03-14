@@ -1,3 +1,4 @@
+from qgis.PyQt.QtGui import QIcon
 from qgis.PyQt.QtWidgets import QAction
 from .generalize_dialog import GeneralizeDialog
 import os.path
@@ -9,7 +10,8 @@ class GeneralizePlugin:
         self.plugin_dir = os.path.dirname(__file__)
 
     def initGui(self):
-        self.action = QAction('Generalize Polygons', self.iface.mainWindow())
+        icon = QIcon(os.path.join(self.plugin_dir, 'icon.svg'))
+        self.action = QAction(icon, 'Generalize Polygons…', self.iface.mainWindow())
         self.action.triggered.connect(self.run)
         self.iface.vectorMenu().addAction(self.action)
 

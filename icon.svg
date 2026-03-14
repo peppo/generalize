@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24">
+  <!-- Complex original polygon (light fill, thin gray border, many vertices) -->
+  <polygon points="3,19 4,13 3,8 6,4 10,3 13,5 12,9 16,6 21,9 22,14 18,19 13,22 8,21"
+           fill="#dde8f8" stroke="#99aabb" stroke-width="0.8" stroke-linejoin="round"/>
+  <!-- Simplified polygon (no fill, bold blue border, fewer vertices) -->
+  <polygon points="3,19 3,8 10,3 21,9 18,19 8,21"
+           fill="none" stroke="#1a6cd4" stroke-width="2" stroke-linejoin="round"/>
+</svg>
