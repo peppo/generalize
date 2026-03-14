@@ -12,7 +12,7 @@ _active_tasks = []
 
 
 class _GeneralizeTask(QgsTask):
-    def __init__(self, layer, percentage, iface, repair=True):
+    def __init__(self, layer, percentage, iface, repair=True, merge_islands=False):
         super().__init__(
             f"Generalizing '{layer.name()}' ({percentage}% reduction)",
             QgsTask.CanCancel,
@@ -21,6 +21,7 @@ class _GeneralizeTask(QgsTask):
         self.percentage = percentage
         self.iface = iface
         self.repair = repair
+        self.merge_islands = merge_islands
         # Capture layer metadata on the main thread before the task starts.
         self.crs_authid = layer.crs().authid()
         self.output_name = layer.name() + '_generalized'
@@ -43,6 +44,7 @@ class _GeneralizeTask(QgsTask):
                 self.percentage,
                 progress_callback=progress_callback,
                 add_to_project=False,
+                merge_islands=self.merge_islands,
             )
         except Exception as e:
             self.exception = e
@@ -137,9 +139,14 @@ class GeneralizeDialog(QDialog):
         self.layout.addWidget(self.slider)
 
         # Repair geometry checkbox
-        self.repair_checkbox = QCheckBox('Repair geometry if necessary')
+        self.repair_checkbox = QCheckBox('Repair output geometry if necessary')
         self.repair_checkbox.setChecked(True)
         self.layout.addWidget(self.repair_checkbox)
+
+        # Remove small islands checkbox
+        self.islands_checkbox = QCheckBox('Merge small islands into adjacent polygons')
+        self.islands_checkbox.setChecked(False)
+        self.layout.addWidget(self.islands_checkbox)
 
         # Buttons
         self.button_layout = QHBoxLayout()
@@ -170,7 +177,8 @@ class GeneralizeDialog(QDialog):
 
         percentage = self.slider.value()
         repair = self.repair_checkbox.isChecked()
-        task = _GeneralizeTask(layer, percentage, self.iface, repair=repair)
+        merge_islands = self.islands_checkbox.isChecked()
+        task = _GeneralizeTask(layer, percentage, self.iface, repair=repair, merge_islands=merge_islands)
         _active_tasks.append(task)
 
         def _cleanup():
