@@ -1,5 +1,6 @@
 import time
 
+import processing
 from qgis.core import QgsVectorLayer, QgsWkbTypes, QgsProject, QgsMessageLog, Qgis
 
 from .topology_builder import build, remove_collinear_vertices, snap_to_self, to_qgs_features
@@ -14,6 +15,23 @@ def _log(msg):
 
 class _Cancelled(Exception):
     """Raised by _set_progress when the caller signals cancellation."""
+
+
+def _check_validity(layer) -> int:
+    """
+    Run the QGIS 'Check Validity' algorithm (GEOS strict) on *layer*.
+
+    Returns the number of invalid features found.
+    """
+    result = processing.run('qgis:checkvalidity', {
+        'INPUT_LAYER': layer,
+        'METHOD': 2,                          # GEOS strict
+        'IGNORE_RING_SELF_INTERSECTION': False,
+        'VALID_OUTPUT': 'memory:',
+        'INVALID_OUTPUT': 'memory:',
+        'ERROR_OUTPUT': 'memory:',
+    })
+    return result['INVALID_OUTPUT'].featureCount()
 
 
 def generalize_polygon_layer(
@@ -48,6 +66,15 @@ def generalize_polygon_layer(
 
     if output_layer:
         raise NotImplementedError("File output not yet implemented. Use None for in-memory.")
+
+    # --- 0. Geometry validity check ---
+    _log("Checking geometry validity …")
+    invalid_count = _check_validity(input_layer)
+    if invalid_count > 0:
+        raise ValueError(
+            f"Input layer contains {invalid_count} invalid feature(s). "
+            "Please repair the geometry (e.g. with 'Fix geometries') before generalizing."
+        )
 
     original_count = input_layer.featureCount()
     _log(f"Starting generalization of '{input_layer.name()}' "

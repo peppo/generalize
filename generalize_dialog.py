@@ -1,4 +1,4 @@
-from qgis.PyQt.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QComboBox, QSlider, QPushButton, QMessageBox
+from qgis.PyQt.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QComboBox, QSlider, QPushButton, QMessageBox, QCheckBox
 from qgis.PyQt.QtCore import Qt
 from qgis.core import QgsProject, QgsVectorLayer, QgsWkbTypes, QgsTask, QgsApplication, QgsMessageLog, Qgis
 
@@ -10,7 +10,7 @@ _active_tasks = []
 
 
 class _GeneralizeTask(QgsTask):
-    def __init__(self, layer, percentage, iface):
+    def __init__(self, layer, percentage, iface, repair=True):
         super().__init__(
             f"Generalizing '{layer.name()}' ({percentage}% reduction)",
             QgsTask.CanCancel,
@@ -18,6 +18,7 @@ class _GeneralizeTask(QgsTask):
         self.input_layer = layer
         self.percentage = percentage
         self.iface = iface
+        self.repair = repair
         # Capture layer metadata on the main thread before the task starts.
         self.crs_authid = layer.crs().authid()
         self.output_name = layer.name() + '_generalized'
@@ -107,6 +108,11 @@ class GeneralizeDialog(QDialog):
         self.layout.addWidget(self.slider_label)
         self.layout.addWidget(self.slider)
 
+        # Repair geometry checkbox
+        self.repair_checkbox = QCheckBox('Repair geometry if necessary')
+        self.repair_checkbox.setChecked(True)
+        self.layout.addWidget(self.repair_checkbox)
+
         # Buttons
         self.button_layout = QHBoxLayout()
         self.ok_button = QPushButton('OK')
@@ -135,7 +141,8 @@ class GeneralizeDialog(QDialog):
             return
 
         percentage = self.slider.value()
-        task = _GeneralizeTask(layer, percentage, self.iface)
+        repair = self.repair_checkbox.isChecked()
+        task = _GeneralizeTask(layer, percentage, self.iface, repair=repair)
         _active_tasks.append(task)
 
         def _cleanup():
