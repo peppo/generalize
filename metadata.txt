@@ -6,7 +6,10 @@ qgisMinimumVersion=3.40
 qgisMaximumVersion=3.99
 author=Peppo Herney
 email=peppo.herney@gmx.de
+homepage=https://github.com/peppo/generalize
 repository=https://github.com/peppo/generalize
+tracker=https://github.com/peppo/generalize/issues
+license=GPL-3.0-or-later
 about=Reduces the vertex count of polygon layers while preserving shape and topology.
 
     Shared borders between adjacent polygons are simplified exactly once, so both
