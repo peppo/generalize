@@ -154,6 +154,13 @@ def generalize_polygon_layer(
     if skipped:
         _log(f"Warning: {skipped} feature(s) collapsed to empty geometry and were skipped.")
 
+    # --- 5. Post-simplification validity check ---
+    invalid_after = sum(1 for f in features if not f.geometry().isGeosValid())
+    if invalid_after:
+        _log(f"Post-simplification check: {invalid_after} of {new_count} feature(s) have invalid geometry.")
+    else:
+        _log(f"Post-simplification check: all {new_count} output geometries are valid.")
+
     _log(f"Done in {time.perf_counter() - t0:.1f}s — {new_count} features ready.")
 
     if not add_to_project:

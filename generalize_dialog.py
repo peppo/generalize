@@ -1,3 +1,5 @@
+import processing
+
 from qgis.PyQt.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QComboBox, QSlider, QPushButton, QMessageBox, QCheckBox
 from qgis.PyQt.QtCore import Qt
 from qgis.core import QgsProject, QgsVectorLayer, QgsWkbTypes, QgsTask, QgsApplication, QgsMessageLog, Qgis
@@ -28,6 +30,7 @@ class _GeneralizeTask(QgsTask):
         self.original_count = 0
         self.new_count = 0
         self.exception = None
+        self.repaired_features = None
 
     def run(self):
         def progress_callback(pct):
@@ -52,6 +55,20 @@ class _GeneralizeTask(QgsTask):
         self.features = features
         self.original_count = original_count
         self.new_count = new_count
+
+        if self.repair:
+            invalid_count = sum(1 for f in features if not f.geometry().isGeosValid())
+            if invalid_count > 0:
+                temp = QgsVectorLayer(f'Polygon?crs={self.crs_authid}', '_temp', 'memory')
+                temp.dataProvider().addAttributes(self.fields)
+                temp.updateFields()
+                temp.dataProvider().addFeatures(features)
+                res = processing.run('native:fixgeometries', {
+                    'INPUT': temp,
+                    'OUTPUT': 'memory:',
+                })
+                self.repaired_features = list(res['OUTPUT'].getFeatures())
+
         return True
 
     def finished(self, result):
@@ -75,6 +92,17 @@ class _GeneralizeTask(QgsTask):
         new_layer.updateFields()
         new_layer.dataProvider().addFeatures(self.features)
         QgsProject.instance().addMapLayer(new_layer)
+
+        if self.repaired_features is not None:
+            repaired_layer = QgsVectorLayer(
+                f'Polygon?crs={self.crs_authid}',
+                self.output_name + '_repaired',
+                'memory',
+            )
+            repaired_layer.dataProvider().addAttributes(self.fields)
+            repaired_layer.updateFields()
+            repaired_layer.dataProvider().addFeatures(self.repaired_features)
+            QgsProject.instance().addMapLayer(repaired_layer)
 
         if self.new_count < self.original_count:
             self.iface.messageBar().pushWarning(
