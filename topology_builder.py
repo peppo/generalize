@@ -230,7 +230,7 @@ def _multipolygon_wkb(parts_rings: list[list[np.ndarray]]) -> bytes:
 # Public API
 # ---------------------------------------------------------------------------
 
-def build(layer: QgsVectorLayer, snap_tolerance: float = 0) -> TopoLayer:
+def build(layer: QgsVectorLayer, snap_tolerance: float = 0, progress_callback=None) -> TopoLayer:
     """
     Build a TopoLayer from a QGIS polygon vector layer.
 
@@ -252,7 +252,7 @@ def build(layer: QgsVectorLayer, snap_tolerance: float = 0) -> TopoLayer:
 
     raw_rings = _extract_rings(layer)
     coord_to_rings = _build_coord_index(raw_rings, snap_tolerance)
-    _build_topology(topo, raw_rings, coord_to_rings)
+    _build_topology(topo, raw_rings, coord_to_rings, progress_callback=progress_callback)
 
     return topo
 
@@ -384,6 +384,7 @@ def _build_topology(
     topo: TopoLayer,
     raw_rings: list[dict],
     coord_to_rings: dict[tuple, set[int]],
+    progress_callback=None,
 ) -> None:
     """
     Core routine.  Iterates every ring in two passes:
@@ -399,7 +400,8 @@ def _build_topology(
     ring_meta: dict[int, dict] = {}
 
     # --- Pass A: build TopoEdges and TopoRings ---
-    for ring in raw_rings:
+    total_rings = len(raw_rings)
+    for ring_idx, ring in enumerate(raw_rings):
         ring_id = ring['ring_id']
         coords  = ring['coords']
         n       = len(coords)
@@ -489,6 +491,9 @@ def _build_topology(
             'attrs':        ring['attrs'],
             'is_multipart': ring['is_multipart'],
         }
+
+        if progress_callback:
+            progress_callback(ring_idx + 1, total_rings)
 
     # --- Pass B: assemble TopoPolygons and set edge ownership ---
     poly_groups: dict[tuple, dict] = defaultdict(

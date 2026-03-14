@@ -411,15 +411,15 @@ class TestTopologicalGeneralization(unittest.TestCase):
             if not geom.isGeosValid():
                 failures.append(f'  feature {feat.id()}')
 
-        # At 50% reduction some self-intersections are expected even with cascade.
+        # At 50% reduction some self-intersections are expected with cascade.
         # We report the count but do not fail so this aggressive-reduction test
         # remains a useful regression check for the overall pipeline.
         invalid_count = len(failures)
         if invalid_count:
             print(
                 f'\n  WARNING: {invalid_count} features have invalid geometry '
-                f'after {self.PERCENTAGE}% simplification (see TestGeneralizationQuality '
-                f'at 20% which asserts zero failures)'
+                f'after {self.PERCENTAGE}% simplification (use visvalingam_topo '
+                f'for topology-preserving simplification)'
             )
         else:
             print(f'\n  All {len(self.simplified)} simplified geometries pass isGeosValid()')
@@ -437,6 +437,7 @@ class TestGeneralizationQuality(unittest.TestCase):
     At 50% (Suite D) some degenerate polygons inevitably produce self-
     intersections because the cascade Visvalingam algorithm is not globally
     topology-aware.  At 20% this does not occur for this dataset.
+    For topology-preserving simplification at higher rates use visvalingam_topo.
     """
 
     PERCENTAGE = 20
@@ -473,10 +474,8 @@ class TestGeneralizationQuality(unittest.TestCase):
         Note: vertex-removal algorithms (including Visvalingam-Whyatt cascade)
         are not topology-preserving in general — they can create self-
         intersections when the removed vertex was load-bearing for the ring's
-        planarity.  We report the count here for regression tracking rather
-        than asserting zero, since the sliver-free guarantee (Suite D) is the
-        primary correctness property of the topology pipeline.  A future
-        improvement would add a "Make Valid" post-processing step.
+        planarity.  We report the count here for regression tracking.
+        For topology-preserving simplification use visvalingam_topo.
         """
         failures = []
         for feat in self.simplified:

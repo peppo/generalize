@@ -1,7 +1,84 @@
-from qgis.PyQt.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QComboBox, QSlider, QPushButton, QMessageBox, QProgressDialog
+from qgis.PyQt.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QComboBox, QSlider, QPushButton, QMessageBox
 from qgis.PyQt.QtCore import Qt
-from qgis.core import QgsProject, QgsVectorLayer, QgsWkbTypes
-from .api import generalize_polygon_layer
+from qgis.core import QgsProject, QgsVectorLayer, QgsWkbTypes, QgsTask, QgsApplication, QgsMessageLog, Qgis
+
+from .api import generalize_polygon_layer, _make_layer
+
+# Keep strong Python references to running tasks so the GC does not collect
+# them before finished() is called (the C++ task manager only holds a C++ ref).
+_active_tasks = []
+
+
+class _GeneralizeTask(QgsTask):
+    def __init__(self, layer, percentage, iface):
+        super().__init__(
+            f"Generalizing '{layer.name()}' ({percentage}% reduction)",
+            QgsTask.CanCancel,
+        )
+        self.input_layer = layer
+        self.percentage = percentage
+        self.iface = iface
+        # Capture layer metadata on the main thread before the task starts.
+        self.crs_authid = layer.crs().authid()
+        self.output_name = layer.name() + '_generalized'
+        self.fields = layer.fields()
+        # Results set by run(), consumed by finished().
+        self.features = None
+        self.original_count = 0
+        self.new_count = 0
+        self.exception = None
+
+    def run(self):
+        def progress_callback(pct):
+            self.setProgress(pct)
+            return self.isCanceled()
+
+        try:
+            result = generalize_polygon_layer(
+                self.input_layer,
+                self.percentage,
+                progress_callback=progress_callback,
+                add_to_project=False,
+            )
+        except Exception as e:
+            self.exception = e
+            return False
+
+        features, original_count, new_count = result
+        if features is None:
+            return False  # cancelled
+
+        self.features = features
+        self.original_count = original_count
+        self.new_count = new_count
+        return True
+
+    def finished(self, result):
+        if self.isCanceled():
+            return
+
+        if not result:
+            msg = str(self.exception) if self.exception else "Unknown error"
+            QgsMessageLog.logMessage(f"Generalization failed: {msg}", "Generalize", Qgis.Critical)
+            self.iface.messageBar().pushCritical("Generalize", f"Failed: {msg}")
+            return
+
+        # Create the layer on the main thread to avoid Qt thread-affinity issues.
+        new_layer = QgsVectorLayer(
+            f'Polygon?crs={self.crs_authid}',
+            self.output_name,
+            'memory',
+        )
+        new_layer.dataProvider().addAttributes(self.fields)
+        new_layer.updateFields()
+        new_layer.dataProvider().addFeatures(self.features)
+        QgsProject.instance().addMapLayer(new_layer)
+
+        if self.new_count < self.original_count:
+            self.iface.messageBar().pushWarning(
+                "Generalize",
+                f"{self.original_count - self.new_count} feature(s) collapsed and were removed.",
+            )
 
 
 class GeneralizeDialog(QDialog):
@@ -57,29 +134,9 @@ class GeneralizeDialog(QDialog):
             return
 
         percentage = self.slider.value()
-        self.generalize_layer(layer, percentage)
+        task = _GeneralizeTask(layer, percentage, self.iface)
+        _active_tasks.append(task)
+        task.taskCompleted.connect(lambda: _active_tasks.remove(task))
+        task.taskTerminated.connect(lambda: _active_tasks.remove(task))
+        QgsApplication.taskManager().addTask(task)
         super().accept()
-
-    def generalize_layer(self, layer, percentage):
-        # Progress dialog
-        progress = QProgressDialog("Generalizing polygons...", "Cancel", 0, layer.featureCount(), self)
-        progress.setWindowModality(Qt.WindowModal)
-        progress.setMinimumDuration(0)
-        progress.setValue(0)
-
-        def progress_callback(current, total):
-            progress.setValue(current)
-            progress.setLabelText(f"Processing feature {current+1} of {total}")
-            return progress.wasCanceled()
-
-        # Use the API
-        new_layer, original_count, new_count = generalize_polygon_layer(layer, percentage, progress_callback=progress_callback)
-
-        progress.setValue(layer.featureCount())
-
-        if progress.wasCanceled():
-            QMessageBox.information(self, 'Cancelled', 'Generalization was cancelled.')
-            return
-
-        if new_count < original_count:
-            QMessageBox.warning(self, 'Warning', f'Some geometries were lost during generalization. Original: {original_count}, Generalized: {new_count}')
