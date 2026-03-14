@@ -55,6 +55,7 @@ class _GeneralizeTask(QgsTask):
 
     def finished(self, result):
         if self.isCanceled():
+            self.iface.messageBar().pushInfo("Generalize", "Generalization cancelled.")
             return
 
         if not result:
@@ -136,7 +137,13 @@ class GeneralizeDialog(QDialog):
         percentage = self.slider.value()
         task = _GeneralizeTask(layer, percentage, self.iface)
         _active_tasks.append(task)
-        task.taskCompleted.connect(lambda: _active_tasks.remove(task))
-        task.taskTerminated.connect(lambda: _active_tasks.remove(task))
+
+        def _cleanup():
+            if task in _active_tasks:
+                _active_tasks.remove(task)
+
+        task.taskCompleted.connect(_cleanup)
+        task.taskTerminated.connect(_cleanup)
+
         QgsApplication.taskManager().addTask(task)
         super().accept()

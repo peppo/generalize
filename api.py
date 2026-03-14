@@ -12,6 +12,10 @@ def _log(msg):
     QgsMessageLog.logMessage(msg, LOG_TAG, Qgis.Info)
 
 
+class _Cancelled(Exception):
+    """Raised by _set_progress when the caller signals cancellation."""
+
+
 def generalize_polygon_layer(
     input_layer,
     percentage,
@@ -66,59 +70,58 @@ def generalize_polygon_layer(
     W_SIMP = 18.0
 
     def _set_progress(pct):
-        if progress_callback:
-            progress_callback(pct)
+        """Update progress; raise _Cancelled if the callback signals cancellation."""
+        if progress_callback and progress_callback(pct):
+            raise _Cancelled()
 
-    # --- 2. Build topology ---
-    _log("Building topology …")
-    t1 = time.perf_counter()
+    try:
+        # --- 2. Build topology ---
+        t1 = time.perf_counter()
 
-    def _topo_progress(current, total):
-        _set_progress(W_TOPO * current / total)
+        def _topo_progress(current, total):
+            _set_progress(W_TOPO * current / total)
 
-    topo = build(layer, progress_callback=_topo_progress)
-    edges = list(topo.edges.values())
-    total_edges = len(edges)
-    total_vertices = sum(len(e.coords) for e in edges)
-    _log(f"Topology built in {time.perf_counter() - t1:.1f}s — "
-         f"{total_edges} edges, {total_vertices:,} vertices")
-    _set_progress(W_TOPO)
+        topo = build(layer, progress_callback=_topo_progress, phase_callback=_log)
+        edges = list(topo.edges.values())
+        total_edges = len(edges)
+        total_vertices = sum(len(e.coords) for e in edges)
+        _log(f"Topology built in {time.perf_counter() - t1:.1f}s — "
+             f"{total_edges} edges, {total_vertices:,} vertices")
+        _set_progress(W_TOPO)
 
-    # --- 3. Simplify every edge exactly once ---
-    _log(f"Simplifying {total_edges} edges …")
-    t2 = time.perf_counter()
-    for i, edge in enumerate(edges):
-        if progress_callback and progress_callback(W_TOPO + W_SIMP * i / total_edges):
-            _log("Cancelled by user.")
-            return None, original_count, 0   # cancelled
+        # --- 3. Simplify every edge exactly once ---
+        _log(f"Simplifying {total_edges} edges …")
+        t2 = time.perf_counter()
+        for i, edge in enumerate(edges):
+            _set_progress(W_TOPO + W_SIMP * i / total_edges)
 
-        is_loop = (edge.start_node == edge.end_node)
-        if is_loop:
-            # Closed ring stored as a loop arc (first coord == last coord).
-            # Use simplify_polygon so the polygon minimum of 4 points applies.
-            edge.coords = simplify_polygon(edge.coords, percentage)
-        else:
-            # Open arc between two distinct junction nodes.
-            edge.coords = simplify_arc(edge.coords, percentage)
+            is_loop = (edge.start_node == edge.end_node)
+            if is_loop:
+                edge.coords = simplify_polygon(edge.coords, percentage)
+            else:
+                edge.coords = simplify_arc(edge.coords, percentage)
 
-    _set_progress(W_TOPO + W_SIMP)
+        _set_progress(W_TOPO + W_SIMP)
 
-    simplified_vertices = sum(len(e.coords) for e in edges)
-    _log(f"Simplification done in {time.perf_counter() - t2:.1f}s — "
-         f"{total_vertices:,} → {simplified_vertices:,} vertices "
-         f"({100 * (1 - simplified_vertices / total_vertices):.1f}% reduction)")
+        simplified_vertices = sum(len(e.coords) for e in edges)
+        _log(f"Simplification done in {time.perf_counter() - t2:.1f}s — "
+             f"{total_vertices:,} → {simplified_vertices:,} vertices "
+             f"({100 * (1 - simplified_vertices / total_vertices):.1f}% reduction)")
 
-    # --- 4. Collect QgsFeatures from the simplified topology ---
-    _log("Reconstructing features …")
-    features = []
-    skipped = 0
-    for feat in to_qgs_features(topo):
-        geom = feat.geometry()
-        # Skip polygons that collapsed to nothing after simplification.
-        if geom.isNull() or geom.isEmpty() or geom.area() <= 0:
-            skipped += 1
-            continue
-        features.append(feat)
+        # --- 4. Collect QgsFeatures from the simplified topology ---
+        _log("Reconstructing features …")
+        features = []
+        skipped = 0
+        for feat in to_qgs_features(topo):
+            geom = feat.geometry()
+            if geom.isNull() or geom.isEmpty() or geom.area() <= 0:
+                skipped += 1
+                continue
+            features.append(feat)
+
+    except _Cancelled:
+        _log("Cancelled by user.")
+        return None, original_count, 0
 
     new_count = len(features)
     if skipped:
@@ -127,7 +130,6 @@ def generalize_polygon_layer(
     _log(f"Done in {time.perf_counter() - t0:.1f}s — {new_count} features ready.")
 
     if not add_to_project:
-        # Return raw features so the caller can create the layer on the main thread.
         return features, original_count, new_count
 
     new_layer = _make_layer(input_layer, features)

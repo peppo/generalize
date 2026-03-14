@@ -230,7 +230,7 @@ def _multipolygon_wkb(parts_rings: list[list[np.ndarray]]) -> bytes:
 # Public API
 # ---------------------------------------------------------------------------
 
-def build(layer: QgsVectorLayer, snap_tolerance: float = 0, progress_callback=None) -> TopoLayer:
+def build(layer: QgsVectorLayer, snap_tolerance: float = 0, progress_callback=None, phase_callback=None) -> TopoLayer:
     """
     Build a TopoLayer from a QGIS polygon vector layer.
 
@@ -250,9 +250,37 @@ def build(layer: QgsVectorLayer, snap_tolerance: float = 0, progress_callback=No
     """
     topo = TopoLayer(snap_tolerance=snap_tolerance)
 
-    raw_rings = _extract_rings(layer)
-    coord_to_rings = _build_coord_index(raw_rings, snap_tolerance)
-    _build_topology(topo, raw_rings, coord_to_rings, progress_callback=progress_callback)
+    # Internal phase weights (must sum to 100):
+    #   20 % – extract rings from layer features
+    #   15 % – build coordinate index
+    #   65 % – build topology (arc splitting, edge creation)
+    W_EXTRACT, W_INDEX, W_BUILD = 20, 15, 65
+
+    def _sub_cb(offset, weight):
+        if progress_callback is None:
+            return None
+        def cb(current, total):
+            if total > 0:
+                progress_callback(offset + weight * current // total, 100)
+        return cb
+
+    if phase_callback:
+        phase_callback("Reading features from layer …")
+    raw_rings = _extract_rings(layer, progress_callback=_sub_cb(0, W_EXTRACT))
+
+    if phase_callback:
+        phase_callback(f"Building coordinate index ({len(raw_rings)} rings) …")
+    coord_to_rings = _build_coord_index(
+        raw_rings, snap_tolerance,
+        progress_callback=_sub_cb(W_EXTRACT, W_INDEX),
+    )
+
+    if phase_callback:
+        phase_callback("Building topology (splitting arcs, creating edges) …")
+    _build_topology(
+        topo, raw_rings, coord_to_rings,
+        progress_callback=_sub_cb(W_EXTRACT + W_INDEX, W_BUILD),
+    )
 
     return topo
 
@@ -300,7 +328,7 @@ def to_qgs_features(topo: TopoLayer) -> list[QgsFeature]:
 # Phase 1 – extract rings
 # ---------------------------------------------------------------------------
 
-def _extract_rings(layer: QgsVectorLayer) -> list[dict]:
+def _extract_rings(layer: QgsVectorLayer, progress_callback=None) -> list[dict]:
     """
     Return a flat list of ring descriptors, one per polygon ring in the layer.
 
@@ -313,8 +341,9 @@ def _extract_rings(layer: QgsVectorLayer) -> list[dict]:
       attrs      – QgsFeature.attributes()
       is_multipart – True when the originating feature was a multipolygon
     """
+    total = layer.featureCount()
     raw_rings: list[dict] = []
-    for feature in layer.getFeatures():
+    for feat_idx, feature in enumerate(layer.getFeatures()):
         geom = feature.geometry()
         fid = feature.id()
         attrs = feature.attributes()
@@ -338,6 +367,9 @@ def _extract_rings(layer: QgsVectorLayer) -> list[dict]:
                     'is_multipart': is_multi,
                 })
 
+        if progress_callback:
+            progress_callback(feat_idx + 1, total)
+
     return raw_rings
 
 
@@ -348,6 +380,7 @@ def _extract_rings(layer: QgsVectorLayer) -> list[dict]:
 def _build_coord_index(
     raw_rings: list[dict],
     snap_tolerance: float,
+    progress_callback=None,
 ) -> dict[tuple, set[int]]:
     """
     Map each (snapped) coordinate to the set of ring_ids that contain it.
@@ -356,6 +389,7 @@ def _build_coord_index(
     arc boundary.
     """
     index: dict[tuple, set[int]] = defaultdict(set)
+    total = len(raw_rings)
 
     if snap_tolerance == 0:
         # Fast path: raw tuple keys, no rounding, no function call overhead.
@@ -363,11 +397,15 @@ def _build_coord_index(
             rid = ring['ring_id']
             for coord in ring['coords']:
                 index[coord].add(rid)
+            if progress_callback:
+                progress_callback(rid + 1, total)
     else:
         for ring in raw_rings:
             rid = ring['ring_id']
             for coord in ring['coords']:
                 index[_snap(coord, snap_tolerance)].add(rid)
+            if progress_callback:
+                progress_callback(rid + 1, total)
 
     return index
 
