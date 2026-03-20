@@ -30,7 +30,7 @@ Processing.initialize()
 # Test data
 # ---------------------------------------------------------------------------
 _DATA_ROOT     = os.path.join(_PKG_ROOT, 'test_data')
-_NO_OVERLAP    = os.path.join(_DATA_ROOT, 'no_overlap.geojson')
+_NO_OVERLAP    = os.path.join(_DATA_ROOT, 'no_overlap', 'no_overlap.geojson')
 
 
 def _load_layer(path: str):
