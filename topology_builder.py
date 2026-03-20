@@ -415,7 +415,8 @@ def _build_coord_index(
 # ---------------------------------------------------------------------------
 
 # Sentinel: coordinate is not shared with any other ring.
-_UNSHARED = 0
+# Must be a value that can never be a ring_id (ring_ids are non-negative integers).
+_UNSHARED = -1
 
 
 def _build_topology(

@@ -72,6 +72,11 @@ def _start_qgis():
     QgsApplication.setPrefixPath(_APP, True)
     _qgs_instance.initQgis()
 
+    # Set project CRS to EPSG:25832 so no on-the-fly reprojection happens
+    # when loading layers that are already in that CRS.
+    from qgis.core import QgsProject, QgsCoordinateReferenceSystem  # noqa: PLC0415
+    QgsProject.instance().setCrs(QgsCoordinateReferenceSystem('EPSG:25832'))
+
     # Register native algorithms so that `import processing` works outside GUI.
     from qgis.analysis import QgsNativeAlgorithms  # noqa: PLC0415
     QgsApplication.processingRegistry().addProvider(QgsNativeAlgorithms())

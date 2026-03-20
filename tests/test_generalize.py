@@ -141,5 +141,37 @@ class TestNoOverlapExpected(unittest.TestCase):
         self._check_feature(3)
 
 
+class TestNoOverlapTopology(unittest.TestCase):
+    """
+    Verify that the topology builder correctly detects shared edges in
+    no_overlap.geojson so the sliver root-cause is clear.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        from generalize.topology_builder import build
+        layer = _load_layer(_NO_OVERLAP)
+        cls.topo = build(layer)
+
+    def test_shared_edges_detected(self):
+        """Polygons 1-2 and 2-3 share boundaries — at least 2 shared edges expected."""
+        self.assertGreater(
+            self.topo.shared_edge_count, 0,
+            f'No shared edges found in no_overlap.geojson — topology detection broken.\n'
+            f'  total edges : {len(self.topo.edges)}\n'
+            f'  shared edges: {self.topo.shared_edge_count}\n'
+            f'  {self.topo}'
+        )
+
+    def test_topology_stats(self):
+        """Print topology stats for diagnosis (never fails)."""
+        print(
+            f'\n  no_overlap topology: {self.topo}\n'
+            f'  shared={self.topo.shared_edge_count}  '
+            f'boundary={self.topo.boundary_edge_count}  '
+            f'total={len(self.topo.edges)}'
+        )
+
+
 if __name__ == '__main__':
     unittest.main(verbosity=2)
