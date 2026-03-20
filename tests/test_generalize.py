@@ -30,7 +30,9 @@ Processing.initialize()
 # Test data
 # ---------------------------------------------------------------------------
 _DATA_ROOT     = os.path.join(_PKG_ROOT, 'test_data')
-_NO_OVERLAP    = os.path.join(_DATA_ROOT, 'no_overlap', 'no_overlap.geojson')
+_NO_OVERLAP_DIR = os.path.join(_DATA_ROOT, 'no_overlap')
+_NO_OVERLAP    = os.path.join(_NO_OVERLAP_DIR, 'no_overlap.geojson')
+_NO_OVERLAP_EXPECTED = os.path.join(_NO_OVERLAP_DIR, 'no_overlap_generalized_expected.geojson')
 
 
 def _load_layer(path: str):
@@ -89,6 +91,54 @@ class TestNoSliver(unittest.TestCase):
             f'pure line (got wkbType {shared.wkbType()}, e.g. GeometryCollection '
             f'with isolated points indicates diverging simplified boundaries)',
         )
+
+
+class TestNoOverlapExpected(unittest.TestCase):
+    """
+    After generalizing no_overlap.geojson at 50%, every feature must match
+    the geometry in no_overlap_generalized_expected.geojson exactly.
+    On failure a diagnostic PNG is written to test_output/.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        from generalize.api import generalize_polygon_layer
+        layer = _load_layer(_NO_OVERLAP)
+        features, _, _ = generalize_polygon_layer(
+            layer, percentage=50, add_to_project=False
+        )
+        cls.features = {f.attributes()[0]: f for f in features}
+
+        expected_layer = _load_layer(_NO_OVERLAP_EXPECTED)
+        cls.expected = {f['id']: f for f in expected_layer.getFeatures()}
+
+    def _render_on_failure(self, fid):
+        from tests.render_geojson import render, output_path
+        render(
+            [_NO_OVERLAP, _NO_OVERLAP_EXPECTED],
+            output_path(f'no_overlap_failure_id{fid}.png'),
+            title=f'no_overlap 50% — mismatch on feature {fid}',
+        )
+
+    def _check_feature(self, fid):
+        actual = self.features[fid].geometry()
+        expected = self.expected[fid].geometry()
+        if not actual.equals(expected):
+            self._render_on_failure(fid)
+            self.fail(
+                f'Feature {fid} geometry does not match expected.\n'
+                f'  actual vertices  : {actual.constGet().vertexCount()}\n'
+                f'  expected vertices: {expected.constGet().vertexCount()}'
+            )
+
+    def test_feature_1_matches_expected(self):
+        self._check_feature(1)
+
+    def test_feature_2_matches_expected(self):
+        self._check_feature(2)
+
+    def test_feature_3_matches_expected(self):
+        self._check_feature(3)
 
 
 if __name__ == '__main__':
