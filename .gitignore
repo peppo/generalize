@@ -110,8 +110,9 @@ dmypy.json
 *.qgs~
 *.qgz~
 
-# Test data (large shapefiles – download separately, see README)
-test_data/
+# Large test datasets – download separately, see README
+test_data/gemeinden*/
+test_data/verwaltungsgrenzen*/
 
 # OS specific
 .DS_Store
