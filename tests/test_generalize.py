@@ -33,9 +33,9 @@ _DATA_ROOT     = os.path.join(_PKG_ROOT, 'test_data')
 _NO_OVERLAP_DIR = os.path.join(_DATA_ROOT, 'no_overlap')
 _NO_OVERLAP    = os.path.join(_NO_OVERLAP_DIR, 'no_overlap.geojson')
 _NO_OVERLAP_EXPECTED = os.path.join(_NO_OVERLAP_DIR, 'no_overlap_generalized_expected.geojson')
-_INVERT_DIR    = os.path.join(_DATA_ROOT, 'invert')
-_INVERT        = os.path.join(_INVERT_DIR, 'invert.geojson')
-_INVERT2       = os.path.join(_INVERT_DIR, 'invert2.geojson')
+_INVERT        = os.path.join(_DATA_ROOT, 'invert',  'invert.geojson')
+_INVERT2       = os.path.join(_DATA_ROOT, 'invert2', 'invert2.geojson')
+_ISLAND        = os.path.join(_DATA_ROOT, 'island_intersect', 'island_intersect.geojson')
 
 
 def _load_layer(path: str):
@@ -208,6 +208,46 @@ class TestInvertValidGeometry(unittest.TestCase):
         self.assertEqual(
             invalid, [],
             'Invalid geometries after 90% generalization of invert.geojson:\n'
+            + '\n'.join(f'  {msg}' for msg in invalid),
+        )
+
+
+class TestIslandIntersectValidGeometry(unittest.TestCase):
+    """
+    After generalizing island_intersect.geojson at 90%, every output feature
+    must be a valid geometry.
+
+    The dataset contains MultiPolygons whose outer ring wraps around hole rings
+    (islands).  At aggressive simplification rates the simplified outer ring can
+    cross a hole boundary — producing a Self-intersection that is distinct from
+    the within-ring inversion tested in TestInvert*: here two *different* rings
+    of the same polygon cross each other.  The constrained cascade prevents
+    within-ring crossings but not cross-ring crossings, so this test exposes
+    the remaining gap.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        from generalize.api import generalize_polygon_layer
+        layer = _load_layer(_ISLAND)
+        features, _, _ = generalize_polygon_layer(
+            layer, percentage=90, add_to_project=False, constrained=True
+        )
+        cls.features = features
+
+    def test_all_features_are_valid(self):
+        """Every generalized feature must pass QGIS isGeosValid()."""
+        invalid = []
+        for f in self.features:
+            geom = f.geometry()
+            if not geom.isGeosValid():
+                fid = f.attributes()[0] if f.attributes() else f.id()
+                invalid.append(
+                    f'feature id={fid}: {geom.lastError()}'
+                )
+        self.assertEqual(
+            invalid, [],
+            'Invalid geometries after 90% generalization of island_intersect.geojson:\n'
             + '\n'.join(f'  {msg}' for msg in invalid),
         )
 

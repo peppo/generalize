@@ -121,17 +121,55 @@ def generalize_polygon_layer(
              f"{total_edges} edges, {total_vertices:,} vertices")
         _set_progress(W_TOPO)
 
-        # --- 3. Simplify every edge exactly once ---
+        # --- 3. Build cross-ring constraint map (constrained mode only) ---
+        # For each edge, collect the original coords of all OTHER rings in the
+        # same polygon so the crossing guard can prevent outer-ring/hole crossings.
+        edge_other_rings: dict[int, list] = {}
+        if constrained:
+            # Cache ring coord arrays (original, before any simplification)
+            ring_coord_cache: dict[int, object] = {}
+            for poly in topo.polygons.values():
+                for ring in [poly.outer_ring] + poly.inner_rings:
+                    rid = id(ring)
+                    if rid not in ring_coord_cache:
+                        ring_coord_cache[rid] = ring.iter_coords_numpy(topo.edges)
+
+            for poly in topo.polygons.values():
+                all_rings = [poly.outer_ring] + poly.inner_rings
+                for ring_idx, ring in enumerate(all_rings):
+                    other_coords = [
+                        ring_coord_cache[id(r)]
+                        for j, r in enumerate(all_rings) if j != ring_idx
+                    ]
+                    for edge_id, _ in ring.half_edges:
+                        if edge_id not in edge_other_rings:
+                            edge_other_rings[edge_id] = (set(), [])
+                        seen, lst = edge_other_rings[edge_id]
+                        for arr in other_coords:
+                            arr_key = id(arr)
+                            if arr_key not in seen:
+                                seen.add(arr_key)
+                                lst.append(arr)
+
+            # Unwrap the (seen, lst) tuples
+            edge_other_rings = {eid: lst for eid, (_, lst) in edge_other_rings.items()}
+
+        # --- 4. Simplify every edge exactly once ---
         _log(f"Simplifying {total_edges} edges …")
         t2 = time.perf_counter()
         for i, edge in enumerate(edges):
             _set_progress(W_TOPO + W_SIMP * i / total_edges)
 
+            other_rings = edge_other_rings.get(edge.id, [])
             is_loop = (edge.start_node == edge.end_node)
             if is_loop:
-                edge.coords = simplify_polygon(edge.coords, percentage, constrained=constrained)
+                edge.coords = simplify_polygon(edge.coords, percentage,
+                                               constrained=constrained,
+                                               other_rings=other_rings)
             else:
-                edge.coords = simplify_arc(edge.coords, percentage, constrained=constrained)
+                edge.coords = simplify_arc(edge.coords, percentage,
+                                           constrained=constrained,
+                                           other_rings=other_rings)
 
         _set_progress(W_TOPO + W_SIMP)
 
@@ -140,7 +178,7 @@ def generalize_polygon_layer(
              f"{total_vertices:,} → {simplified_vertices:,} vertices "
              f"({100 * (1 - simplified_vertices / total_vertices):.1f}% reduction)")
 
-        # --- 4. Collect QgsFeatures from the simplified topology ---
+        # --- 5. Collect QgsFeatures from the simplified topology ---
         _log("Reconstructing features …")
         features = []
         skipped = 0

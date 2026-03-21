@@ -57,6 +57,33 @@ def _crosses_any_vec(active, coords, lx, ly, rx, ry):
 
     return bool(np.any((d1 * d2 < 0) & (d3 * d4 < 0)))
 
+
+def _crosses_static_rings(other_rings, lx, ly, rx, ry):
+    """
+    Check whether the chord (lx,ly)→(rx,ry) properly crosses any segment of
+    any ring in ``other_rings``.
+
+    ``other_rings`` is a list of numpy arrays of shape (m, 2), each representing
+    the closed coordinate sequence of a ring that must not be crossed.  Used to
+    prevent a simplified ring from crossing a hole (or vice-versa) in the same
+    polygon.
+    """
+    for ring_coords in other_rings:
+        if len(ring_coords) < 2:
+            continue
+        ax = ring_coords[:-1, 0];  ay = ring_coords[:-1, 1]
+        bx = ring_coords[1:,  0];  by = ring_coords[1:,  1]
+        dx_lr = rx - lx;  dy_lr = ry - ly
+        d1 = (ax - lx) * dy_lr - (ay - ly) * dx_lr
+        d2 = (bx - lx) * dy_lr - (by - ly) * dx_lr
+        dx_ab = bx - ax;  dy_ab = by - ay
+        d3 = (lx - ax) * dy_ab - (ly - ay) * dx_ab
+        d4 = (rx - ax) * dy_ab - (ry - ay) * dx_ab
+        if np.any((d1 * d2 < 0) & (d3 * d4 < 0)):
+            return True
+    return False
+
+
 def _weighted_area_scalar(ax, ay, bx, by, cx, cy):
     """Weighted triangle area for a single point triple (scalar version)."""
     area = abs((bx - ax) * (cy - ay) - (cx - ax) * (by - ay)) / 2
@@ -103,7 +130,7 @@ def _weighted_areas_vec(coords):
 # Cascade (heap-based) implementation
 # ---------------------------------------------------------------------------
 
-def _visvalingam_cascade_constrained(coords, keep_count):
+def _visvalingam_cascade_constrained(coords, keep_count, other_rings=None):
     """
     Constrained Visvalingam cascade: identical to the regular cascade but
     skips any removal that would introduce a self-intersection in the ring.
@@ -153,7 +180,8 @@ def _visvalingam_cascade_constrained(coords, keep_count):
         # Temporarily mark i as inactive so _crosses_any_vec sees the
         # ring as it would look after the removal.
         active[i] = False
-        if _crosses_any_vec(active, coords, lx, ly, rx, ry):
+        if (_crosses_any_vec(active, coords, lx, ly, rx, ry) or
+                (other_rings and _crosses_static_rings(other_rings, lx, ly, rx, ry))):
             # Removing i would create a crossing — lock it permanently.
             active[i] = True
             areas[i] = np.inf
@@ -274,7 +302,8 @@ def _visvalingam_vec(coords, keep_count):
 # Public API
 # ---------------------------------------------------------------------------
 
-def simplify_polygon(coords, percentage, cascade=False, constrained=False):
+def simplify_polygon(coords, percentage, cascade=False, constrained=False,
+                     other_rings=None):
     """
     Simplify a closed polygon ring.
 
@@ -282,22 +311,28 @@ def simplify_polygon(coords, percentage, cascade=False, constrained=False):
     equals the first (closing duplicate included).  The first and last
     points are never removed.  At least 4 points are kept.
 
-    :param cascade:     use the slower heap-cascade algorithm (default: False).
-    :param constrained: use the crossing-guarded cascade that prevents
-                        self-intersections (default: False).  Implies cascade.
-                        Slower but guarantees a valid output ring.
+    :param cascade:      use the slower heap-cascade algorithm (default: False).
+    :param constrained:  use the crossing-guarded cascade that prevents
+                         self-intersections (default: False).  Implies cascade.
+                         Slower but guarantees a valid output ring.
+    :param other_rings:  list of numpy arrays (m, 2) for rings of the same
+                         polygon that must not be crossed (e.g. hole rings when
+                         simplifying the outer ring, or the outer ring when
+                         simplifying a hole).  Only used when constrained=True.
     """
     n = len(coords)
     if n < 4:
         return coords
     keep_count = max(4, int(n * (1 - percentage / 100)))
     if constrained:
-        return _visvalingam_cascade_constrained(coords, keep_count)
+        return _visvalingam_cascade_constrained(coords, keep_count,
+                                                other_rings=other_rings)
     fn = _visvalingam_cascade if cascade else _visvalingam_vec
     return fn(coords, keep_count)
 
 
-def simplify_arc(coords, percentage, cascade=False, constrained=False):
+def simplify_arc(coords, percentage, cascade=False, constrained=False,
+                 other_rings=None):
     """
     Simplify an open arc between two fixed junction nodes.
 
@@ -305,15 +340,19 @@ def simplify_arc(coords, percentage, cascade=False, constrained=False):
     coords[-1] are the junction nodes and are never removed.  At least
     2 points are kept.
 
-    :param cascade:     use the slower heap-cascade algorithm (default: False).
-    :param constrained: use the crossing-guarded cascade (default: False).
-                        Implies cascade.  Slower but guarantees no crossings.
+    :param cascade:      use the slower heap-cascade algorithm (default: False).
+    :param constrained:  use the crossing-guarded cascade (default: False).
+                         Implies cascade.  Slower but guarantees no crossings.
+    :param other_rings:  list of numpy arrays (m, 2) — rings of the same
+                         polygon that must not be crossed.  Only used when
+                         constrained=True.
     """
     n = len(coords)
     if n <= 2:
         return coords
     keep_count = max(2, int(n * (1 - percentage / 100)))
     if constrained:
-        return _visvalingam_cascade_constrained(coords, keep_count)
+        return _visvalingam_cascade_constrained(coords, keep_count,
+                                                other_rings=other_rings)
     fn = _visvalingam_cascade if cascade else _visvalingam_vec
     return fn(coords, keep_count)
