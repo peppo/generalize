@@ -101,12 +101,15 @@ def generalize_polygon_layer(
     else:
         layer = input_layer
 
-    # Progress is split across phases by expected cost:
-    #   0 –  80 %  topology build  (by ring)
-    #  80 –  98 %  simplification  (by edge)
-    #  98 – 100 %  reconstruction
-    W_TOPO = 80.0
-    W_SIMP = 18.0
+    # Progress weights based on measured timing on gemeinden_bayern (50%):
+    #   unconstrained: topology 96 %, simplification  3 %, reconstruction 1 %
+    #   constrained:   topology  5 %, simplification 93 %, reconstruction 2 %
+    if constrained:
+        W_TOPO =  5.0
+        W_SIMP = 93.0
+    else:
+        W_TOPO = 96.0
+        W_SIMP =  3.0
 
     def _set_progress(pct):
         """Update progress; raise _Cancelled if the callback signals cancellation."""
@@ -139,6 +142,7 @@ def generalize_polygon_layer(
         edge_other_rings: dict[int, list] = {}
         if constrained:
             from collections import defaultdict as _defaultdict
+            t3 = time.perf_counter()
 
             # Cache original edge coords before any simplification.
             edge_coord_cache: dict[int, object] = {
@@ -224,6 +228,7 @@ def generalize_polygon_layer(
 
             # Unwrap the (seen, lst) tuples.
             edge_other_rings = {eid: lst for eid, (_, lst) in edge_other_rings.items()}
+            _log(f"Constraint map built in {time.perf_counter() - t3:.1f}s")
 
         # --- 4. Simplify every edge exactly once ---
         _log(f"Simplifying {total_edges} edges …")
@@ -258,6 +263,7 @@ def generalize_polygon_layer(
                      f"{n_holes} hole(s) in {time.perf_counter() - t_ds:.1f}s")
 
         # --- 5. Collect QgsFeatures from the simplified topology ---
+        t5 = time.perf_counter()
         _log("Reconstructing features …")
         features = []
         skipped = 0
@@ -267,6 +273,7 @@ def generalize_polygon_layer(
                 skipped += 1
                 continue
             features.append(feat)
+        _log(f"Reconstruction done in {time.perf_counter() - t5:.1f}s")
 
     except _Cancelled:
         _log("Cancelled by user.")

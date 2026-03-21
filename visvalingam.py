@@ -26,26 +26,31 @@ from heapq import heappush, heappop, heapify
 # ---------------------------------------------------------------------------
 
 
-def _crosses_any_vec(active, coords, lx, ly, rx, ry):
+def _crosses_any_segs(seg_valid, seg_ax, seg_ay, seg_bx, seg_by, lx, ly, rx, ry):
     """
-    Vectorised proper-crossing test.
+    Vectorised proper-crossing test against pre-allocated segment arrays.
 
-    Check whether the chord (lx,ly)→(rx,ry) properly crosses any segment of
-    the current ring.  ``active`` is a boolean numpy array of length n; the
-    current ring segments are the consecutive pairs of active points.
+    Check whether the chord (lx,ly)→(rx,ry) properly crosses any active
+    segment.  Works on pre-allocated contiguous arrays (no fancy indexing)
+    and applies a bounding-box pre-filter to skip distant segments before
+    the full cross-product test.
 
-    The caller must have already cleared ``active[i]`` for the candidate point
-    being considered for removal, so that point's two segments are gone and the
-    new chord is checked in their place.
-
-    Adjacent segments sharing an endpoint with the chord cannot produce a
-    proper crossing (strict interior test), so no explicit exclusion is needed.
+    ``seg_valid`` is a boolean mask of length n-1 updated in-place by
+    the caller; ``seg_ax/ay/bx/by`` are the segment coordinate arrays.
     """
-    rem = np.where(active)[0]       # indices of remaining points, in order
-    if len(rem) < 2:
+    cx0 = lx if lx <= rx else rx;  cx1 = rx if lx <= rx else lx
+    cy0 = ly if ly <= ry else ry;  cy1 = ry if ly <= ry else ly
+
+    mask = (seg_valid
+            & (np.minimum(seg_ax, seg_bx) <= cx1)
+            & (np.maximum(seg_ax, seg_bx) >= cx0)
+            & (np.minimum(seg_ay, seg_by) <= cy1)
+            & (np.maximum(seg_ay, seg_by) >= cy0))
+    if not np.any(mask):
         return False
-    ax = coords[rem[:-1], 0];  ay = coords[rem[:-1], 1]   # segment starts
-    bx = coords[rem[1:],  0];  by = coords[rem[1:],  1]   # segment ends
+
+    ax = seg_ax[mask];  ay = seg_ay[mask]
+    bx = seg_bx[mask];  by = seg_by[mask]
 
     dx_lr = rx - lx;  dy_lr = ry - ly
     d1 = (ax - lx) * dy_lr - (ay - ly) * dx_lr
@@ -68,11 +73,18 @@ def _crosses_static_rings(other_rings, lx, ly, rx, ry):
     prevent a simplified ring from crossing a hole (or vice-versa) in the same
     polygon.
     """
+    cx0 = lx if lx <= rx else rx;  cx1 = rx if lx <= rx else lx
+    cy0 = ly if ly <= ry else ry;  cy1 = ry if ly <= ry else ly
     for ring_coords in other_rings:
         if len(ring_coords) < 2:
             continue
         ax = ring_coords[:-1, 0];  ay = ring_coords[:-1, 1]
         bx = ring_coords[1:,  0];  by = ring_coords[1:,  1]
+        mask = ((np.minimum(ax, bx) <= cx1) & (np.maximum(ax, bx) >= cx0)
+                & (np.minimum(ay, by) <= cy1) & (np.maximum(ay, by) >= cy0))
+        if not np.any(mask):
+            continue
+        ax = ax[mask];  ay = ay[mask];  bx = bx[mask];  by = by[mask]
         dx_lr = rx - lx;  dy_lr = ry - ly
         d1 = (ax - lx) * dy_lr - (ay - ly) * dx_lr
         d2 = (bx - lx) * dy_lr - (by - ly) * dx_lr
@@ -139,6 +151,11 @@ def _visvalingam_cascade_constrained(coords, keep_count, other_rings=None):
     against every current segment of the ring.  If a proper crossing is found
     the point's effective area is set to ∞ so it is never removed.
 
+    Uses pre-allocated contiguous segment arrays (seg_ax/ay/bx/by) maintained
+    in O(1) per removal via a prev_seg pointer array, plus a bounding-box
+    pre-filter, making the inner loop much faster than the original active-mask
+    approach.
+
     O(n²) worst-case, but guarantees a topologically valid output ring.
     Use only when regular simplification would produce invalid geometry.
     """
@@ -153,9 +170,29 @@ def _visvalingam_cascade_constrained(coords, keep_count, other_rings=None):
     heap.append((np.inf, n - 1))
     heapify(heap)
 
-    active  = np.ones(n, dtype=bool)   # active[i] = point still in ring
     removed = set()
     current_count = n
+
+    # Pre-allocated segment arrays — avoids np.where + fancy-index per step.
+    #
+    # seg[k] represents the segment starting at original point k.
+    # Invariant: seg[k] goes from coords[k] (start, never changes) to some
+    # current endpoint stored in seg_bx/by[k].
+    #
+    # prev_seg[i] = index k of the segment currently ENDING at point i.
+    # Initially k = i-1, since seg[i-1] = coords[i-1]→coords[i].
+    #
+    # When point i is removed (left=l, right=r):
+    #   ps = prev_seg[i]           -- segment currently ending at i (starts at l)
+    #   seg_bx[ps], seg_by[ps] = rx, ry   -- extend it to r
+    #   seg_valid[i] = False       -- hide the segment starting at i (was i→r)
+    #   prev_seg[r] = ps           -- ps now ends at r
+    seg_ax    = coords[:-1, 0].copy()
+    seg_ay    = coords[:-1, 1].copy()
+    seg_bx    = coords[1:,  0].copy()
+    seg_by    = coords[1:,  1].copy()
+    seg_valid = np.ones(n - 1, dtype=bool)
+    prev_seg  = np.arange(n, dtype=np.intp) - 1  # prev_seg[i] = i-1; size n so right=n-1 is safe
 
     while heap and current_count > keep_count:
         val, i = heappop(heap)
@@ -177,20 +214,28 @@ def _visvalingam_cascade_constrained(coords, keep_count, other_rings=None):
         lx, ly = coords[left,  0], coords[left,  1]
         rx, ry = coords[right, 0], coords[right, 1]
 
-        # Temporarily mark i as inactive so _crosses_any_vec sees the
-        # ring as it would look after the removal.
-        active[i] = False
-        if (_crosses_any_vec(active, coords, lx, ly, rx, ry) or
-                (other_rings and _crosses_static_rings(other_rings, lx, ly, rx, ry))):
-            # Removing i would create a crossing — lock it permanently.
-            active[i] = True
+        # Speculatively update segment arrays to reflect the post-removal ring:
+        #   extend seg[ps] from l→i to l→r, hide seg[i] (was i→r).
+        ps = prev_seg[i]
+        old_bx, old_by = seg_bx[ps], seg_by[ps]
+        seg_bx[ps] = rx;  seg_by[ps] = ry
+        seg_valid[i] = False
+
+        if (_crosses_any_segs(seg_valid, seg_ax, seg_ay, seg_bx, seg_by,
+                               lx, ly, rx, ry) or
+                (other_rings and _crosses_static_rings(other_rings,
+                                                       lx, ly, rx, ry))):
+            # Undo speculation — lock this point permanently.
+            seg_bx[ps] = old_bx;  seg_by[ps] = old_by
+            seg_valid[i] = True
             areas[i] = np.inf
             heappush(heap, (np.inf, i))
             continue
 
+        # Accept: commit the speculative update.
+        prev_seg[right] = ps
         removed.add(i)
         current_count -= 1
-        # active[i] already False — leave it
 
         if 0 < left < n - 1:
             new_area = _weighted_area_scalar(*coords[left - 1], *coords[left], *coords[right])
