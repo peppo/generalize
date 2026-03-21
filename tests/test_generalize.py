@@ -36,6 +36,9 @@ _NO_OVERLAP_EXPECTED = os.path.join(_NO_OVERLAP_DIR, 'no_overlap_generalized_exp
 _INVERT        = os.path.join(_DATA_ROOT, 'invert',  'invert.geojson')
 _INVERT2       = os.path.join(_DATA_ROOT, 'invert2', 'invert2.geojson')
 _ISLAND        = os.path.join(_DATA_ROOT, 'island_intersect', 'island_intersect.geojson')
+_GEMEINDEN_BAYERN  = os.path.join(_DATA_ROOT, 'gemeinden_bayern',   'VerwaltungsEinheit.shp')
+_TOO_FEW_POINTS    = os.path.join(_DATA_ROOT, 'too_few_points',     'too_few_points.geojson')
+_SELF_INTERSECTION = os.path.join(_DATA_ROOT, 'self_intersection',  'self_intersection.geojson')
 
 
 def _load_layer(path: str):
@@ -281,6 +284,163 @@ class TestInvert2ValidGeometry(unittest.TestCase):
             invalid, [],
             'Invalid geometries after 90% generalization of invert2.geojson:\n'
             + '\n'.join(f'  {msg}' for msg in invalid),
+        )
+
+
+class TestTooFewPointsValidGeometry(unittest.TestCase):
+    """
+    Regression test for Neureichenau (DE092720136136).
+
+    At 50% generalisation this municipality contains a small island polygon
+    whose ring is built from multiple topology arcs.  When each arc is
+    simplified independently down to its two junction nodes the reconstructed
+    ring ends up with fewer than 3 distinct points — a degenerate geometry
+    that QGIS/GEOS rejects as 'Too few points in geometry component'.
+
+    The fix: after topology reconstruction, drop any ring with < 3 distinct
+    vertices instead of propagating the degenerate component.
+    """
+
+    PERCENTAGE = 50
+
+    @classmethod
+    def setUpClass(cls):
+        from generalize.api import generalize_polygon_layer
+        layer = _load_layer(_TOO_FEW_POINTS)
+        features, _, _ = generalize_polygon_layer(
+            layer, percentage=cls.PERCENTAGE, add_to_project=False,
+            constrained=True,
+        )
+        cls.features = features
+
+    def test_all_features_are_valid(self):
+        """Every generalized feature must pass QGIS isGeosValid()."""
+        invalid = []
+        for f in self.features:
+            geom = f.geometry()
+            if not geom.isGeosValid():
+                idx = f.fieldNameIndex('gml_id')
+                fid = f.attribute(idx) if idx >= 0 else f.id()
+                invalid.append(f'  {fid}: {geom.lastError()}')
+        self.assertEqual(
+            invalid, [],
+            'Invalid geometries after 50% generalisation of too_few_points.geojson:\n'
+            + '\n'.join(invalid),
+        )
+
+
+class TestSelfIntersectionValidGeometry(unittest.TestCase):
+    """
+    Regression test for Jettingen-Scheppach (DE097740144144).
+
+    At 50% generalisation this polygon produces a Self-intersection even with
+    constrained=True.  The constrained cascade guards each topology arc against
+    self-intersections *within that arc*, but a ring is composed of multiple
+    independent arcs.  After simplification, two separate arcs of the same ring
+    can cross each other — the per-arc constraint does not see this.
+
+    The fix: after topology reconstruction, detect and repair cross-arc
+    self-intersections (e.g. by using GEOS buffer(0) or by post-processing
+    the ring).
+    """
+
+    PERCENTAGE = 50
+
+    @classmethod
+    def setUpClass(cls):
+        from generalize.api import generalize_polygon_layer
+        layer = _load_layer(_SELF_INTERSECTION)
+        features, _, _ = generalize_polygon_layer(
+            layer, percentage=cls.PERCENTAGE, add_to_project=False,
+            constrained=True,
+        )
+        cls.features = features
+
+    def test_all_features_are_valid(self):
+        """Every generalized feature must pass QGIS isGeosValid()."""
+        invalid = []
+        for f in self.features:
+            geom = f.geometry()
+            if not geom.isGeosValid():
+                idx = f.fieldNameIndex('gml_id')
+                fid = f.attribute(idx) if idx >= 0 else f.id()
+                invalid.append(f'  {fid}: {geom.lastError()}')
+        self.assertEqual(
+            invalid, [],
+            'Invalid geometries after 50% generalisation of self_intersection.geojson:\n'
+            + '\n'.join(invalid),
+        )
+
+
+class TestGemeindenBayernValidGeometry(unittest.TestCase):
+    """
+    After generalizing gemeinden_bayern at 50% with constrained=True, every
+    output feature must pass the QGIS 'Check Validity' algorithm (GEOS strict).
+
+    On failure the test prints a summary of every error message produced by
+    the validity checker, including the exact location and a description, so
+    the failing geometry can be reproduced and inspected in QGIS.
+    """
+
+    PERCENTAGE = 50
+
+    @classmethod
+    def setUpClass(cls):
+        import processing
+        from qgis.core import QgsVectorLayer
+        from generalize.api import generalize_polygon_layer
+
+        layer = _load_layer(_GEMEINDEN_BAYERN)
+        features, _, _ = generalize_polygon_layer(
+            layer, percentage=cls.PERCENTAGE, add_to_project=False,
+            constrained=True,
+        )
+        cls.features = features
+
+        # Build a temporary in-memory layer for the validity check algorithm.
+        temp = QgsVectorLayer(
+            f'Polygon?crs={layer.crs().authid()}', '_temp', 'memory'
+        )
+        temp.dataProvider().addAttributes(layer.fields())
+        temp.updateFields()
+        temp.dataProvider().addFeatures(features)
+
+        result = processing.run('qgis:checkvalidity', {
+            'INPUT_LAYER': temp,
+            'METHOD': 2,                          # GEOS strict
+            'IGNORE_RING_SELF_INTERSECTION': False,
+            'VALID_OUTPUT':   'memory:',
+            'INVALID_OUTPUT': 'memory:',
+            'ERROR_OUTPUT':   'memory:',
+        })
+        cls.invalid_layer = result['INVALID_OUTPUT']
+        cls.error_layer   = result['ERROR_OUTPUT']
+
+    def test_all_features_are_valid(self):
+        """Every generalized feature must pass QGIS/GEOS validity check."""
+        invalid_count = self.invalid_layer.featureCount()
+        if invalid_count == 0:
+            return
+
+        # Report invalid feature names (gml_id / name) from the invalid layer.
+        invalid_names = []
+        for f in self.invalid_layer.getFeatures():
+            gml_id = f.attribute('gml_id') or f.id()
+            name   = f.attribute('name') or ''
+            invalid_names.append(f'  {gml_id} ({name})')
+
+        # Report error messages + coordinates from the error point layer.
+        error_msgs = []
+        for f in self.error_layer.getFeatures():
+            pt  = f.geometry().asPoint()
+            msg = f.attribute('message') or ''
+            error_msgs.append(f'  ({pt.x():.2f}, {pt.y():.2f}): {msg}')
+
+        self.fail(
+            f'{invalid_count} invalid feature(s) after {self.PERCENTAGE}% '
+            f'generalization of gemeinden_bayern:\n'
+            'Invalid features:\n' + '\n'.join(invalid_names) + '\n'
+            'Errors:\n' + '\n'.join(error_msgs)
         )
 
 
