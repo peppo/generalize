@@ -261,12 +261,32 @@ def generalize_polygon_layer(
     if skipped:
         _log(f"Warning: {skipped} feature(s) collapsed to empty geometry and were skipped.")
 
-    # --- 5. Post-simplification validity check ---
-    invalid_after = sum(1 for f in features if not f.geometry().isGeosValid())
-    if invalid_after:
-        _log(f"Post-simplification check: {invalid_after} of {new_count} feature(s) have invalid geometry.")
-    else:
+    # --- 5. Post-simplification validity check (and repair in constrained mode) ---
+    # The per-arc constraint prevents most self-intersections, but cannot cover
+    # all edge cases — e.g. two parts of a MultiPolygon that originally touch
+    # at a single junction node can end up with slightly overlapping simplified
+    # shapes (both sides add chords near the junction point).  In constrained
+    # mode we apply makeValid() as a safety net for any remaining invalid
+    # geometry.  makeValid() is cheap (no-op for already-valid geometry) and
+    # produces minimal geometry changes (GEOS "structure" method).
+    invalid_after = 0
+    repaired = 0
+    for feat in features:
+        geom = feat.geometry()
+        if geom.isGeosValid():
+            continue
+        invalid_after += 1
+        if constrained:
+            fixed = geom.makeValid()
+            if not fixed.isNull() and fixed.area() > 0:
+                feat.setGeometry(fixed)
+                repaired += 1
+    if invalid_after == 0:
         _log(f"Post-simplification check: all {new_count} output geometries are valid.")
+    elif constrained:
+        _log(f"Post-simplification check: {invalid_after} geometry(s) repaired with makeValid().")
+    else:
+        _log(f"Post-simplification check: {invalid_after} of {new_count} feature(s) have invalid geometry.")
 
     _log(f"Done in {time.perf_counter() - t0:.1f}s — {new_count} features ready.")
 

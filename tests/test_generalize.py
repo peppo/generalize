@@ -8,6 +8,7 @@ Run from the command line (no QGIS GUI required):
 import os
 import sys
 import unittest
+import pytest
 
 # ---------------------------------------------------------------------------
 # Bootstrap – must happen before any qgis.* import
@@ -374,6 +375,7 @@ class TestSelfIntersectionValidGeometry(unittest.TestCase):
         )
 
 
+@pytest.mark.slow
 class TestGemeindenBayernValidGeometry(unittest.TestCase):
     """
     After generalizing gemeinden_bayern at 50% with constrained=True, every
@@ -484,6 +486,7 @@ class TestUntrasriedValidGeometry(unittest.TestCase):
         )
 
 
+@pytest.mark.slow
 class TestGemeindenDeutschlandValidGeometry(unittest.TestCase):
     """
     After generalizing gemeinden_deutschland at 50% with constrained=True,
