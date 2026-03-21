@@ -39,6 +39,8 @@ _INVERT2       = os.path.join(_DATA_ROOT, 'invert2', 'invert2.geojson')
 _ISLAND        = os.path.join(_DATA_ROOT, 'island_intersect', 'island_intersect.geojson')
 _GEMEINDEN_BAYERN       = os.path.join(_DATA_ROOT, 'gemeinden_bayern',       'VerwaltungsEinheit.shp')
 _GEMEINDEN_DEUTSCHLAND  = os.path.join(_DATA_ROOT, 'gemeinden_deutschland',  'Gemeinden_Deutschland.shp') + '|option:SHAPE_RESTORE_SHX=YES'
+_GREAT_BRITAIN          = os.path.join(_DATA_ROOT, 'great_britain',           'westminster_const_region.shp')
+_FRANCE                 = os.path.join(_DATA_ROOT, 'france',                  'communes-20220101.shp')
 _UNTRASRIED             = os.path.join(_DATA_ROOT, 'untrasried',              'untrasried.geojson')
 _TOO_FEW_POINTS         = os.path.join(_DATA_ROOT, 'too_few_points',         'too_few_points.geojson')
 _SELF_INTERSECTION      = os.path.join(_DATA_ROOT, 'self_intersection',       'self_intersection.geojson')
@@ -551,6 +553,104 @@ class TestGemeindenDeutschlandValidGeometry(unittest.TestCase):
             f'generalization of gemeinden_deutschland:\n'
             'Invalid features:\n' + '\n'.join(invalid_names) + '\n'
             'Errors:\n' + '\n'.join(error_msgs)
+        )
+
+
+def _validity_test_body(test_case, invalid_layer, error_layer, percentage, dataset_name,
+                         name_field, id_field):
+    """Shared failure reporting for full-dataset validity tests."""
+    invalid_count = invalid_layer.featureCount()
+    if invalid_count == 0:
+        return
+
+    invalid_names = []
+    for f in invalid_layer.getFeatures():
+        name = f.attribute(name_field) or ''
+        oid  = f.attribute(id_field) if id_field else f.id()
+        invalid_names.append(f'  {oid} ({name})')
+
+    error_msgs = []
+    for f in error_layer.getFeatures():
+        pt  = f.geometry().asPoint()
+        msg = f.attribute('message') or ''
+        error_msgs.append(f'  ({pt.x():.4f}, {pt.y():.4f}): {msg}')
+
+    test_case.fail(
+        f'{invalid_count} invalid feature(s) after {percentage}% '
+        f'generalization of {dataset_name}:\n'
+        'Invalid features:\n' + '\n'.join(invalid_names) + '\n'
+        'Errors:\n' + '\n'.join(error_msgs)
+    )
+
+
+def _run_validity_check(layer, percentage, constrained):
+    """Generalise *layer* and run QGIS checkvalidity; return (invalid, error) layers."""
+    import processing
+    from qgis.core import QgsVectorLayer
+    from generalize.api import generalize_polygon_layer
+
+    features, _, _ = generalize_polygon_layer(
+        layer, percentage=percentage, add_to_project=False, constrained=constrained,
+    )
+    temp = QgsVectorLayer(f'Polygon?crs={layer.crs().authid()}', '_temp', 'memory')
+    temp.dataProvider().addAttributes(layer.fields())
+    temp.updateFields()
+    temp.dataProvider().addFeatures(features)
+    result = processing.run('qgis:checkvalidity', {
+        'INPUT_LAYER': temp, 'METHOD': 2,
+        'IGNORE_RING_SELF_INTERSECTION': False,
+        'VALID_OUTPUT': 'memory:', 'INVALID_OUTPUT': 'memory:', 'ERROR_OUTPUT': 'memory:',
+    })
+    return result['INVALID_OUTPUT'], result['ERROR_OUTPUT']
+
+
+@pytest.mark.slow
+class TestGreatBritainValidGeometry(unittest.TestCase):
+    """
+    After generalizing westminster_const_region (632 Westminster
+    constituencies, EPSG:27700) at 50% with constrained=True, every output
+    feature must pass the QGIS 'Check Validity' algorithm (GEOS strict).
+    """
+
+    PERCENTAGE = 50
+
+    @classmethod
+    def setUpClass(cls):
+        layer = _load_layer(_GREAT_BRITAIN)
+        cls.invalid_layer, cls.error_layer = _run_validity_check(
+            layer, cls.PERCENTAGE, constrained=True,
+        )
+
+    def test_all_features_are_valid(self):
+        _validity_test_body(
+            self, self.invalid_layer, self.error_layer,
+            self.PERCENTAGE, 'great_britain',
+            name_field='NAME', id_field=None,
+        )
+
+
+@pytest.mark.slow
+class TestFranceValidGeometry(unittest.TestCase):
+    """
+    After generalizing communes-20220101 (34 955 French communes,
+    EPSG:4326) at 50% with constrained=True, every output feature must
+    pass the QGIS 'Check Validity' algorithm (GEOS strict).
+    """
+
+    PERCENTAGE = 50
+
+    @classmethod
+    def setUpClass(cls):
+        layer = _load_layer(_FRANCE)
+        cls.invalid_layer, cls.error_layer = _run_validity_check(
+            layer, cls.PERCENTAGE, constrained=True,
+        )
+
+    def test_all_features_are_valid(self):
+        _validity_test_body(
+            self, self.invalid_layer, self.error_layer,
+            self.PERCENTAGE, 'france',
+            name_field='nom', id_field='insee',
         )
 
 

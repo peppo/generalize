@@ -118,5 +118,5 @@ test_data/verwaltungsgrenzen*/
 .DS_Store
 Thumbs.db
 # Large external country datasets
-test_data/great_britan/
+test_data/great_britain/
 test_data/france/
