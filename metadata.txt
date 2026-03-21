@@ -1,7 +1,7 @@
 [general]
 name=Generalize Polygons
 description=Topology-preserving polygon simplification using the weighted Visvalingam algorithm — no slivers, no gaps.
-version=0.5.1
+version=0.5.2-SNAPSHOT
 qgisMinimumVersion=3.40
 qgisMaximumVersion=3.99
 author=Peppo Herney
