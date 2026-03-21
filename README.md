@@ -25,7 +25,8 @@ Topology-preserving polygon simplification using the weighted Visvalingam-Whyatt
    cd %APPDATA%\QGIS\QGIS3\profiles\default\python\plugins
    git clone https://github.com/peppo/generalize.git
    ```
-2. Restart QGIS and enable the plugin in the Plugin Manager
+2. mklink /j "C:\Users\<username>\AppData\Roaming\QGIS\QGIS3\profiles\default\python\plugins\generalize" "c:\<your workspace>\generalize" 
+3. Restart QGIS and enable the plugin in the Plugin Manager
 
 ## Usage
 
