@@ -147,14 +147,14 @@ class GeneralizeDialog(QDialog):
 
         # Constrained simplification checkbox
         self.constrained_checkbox = QCheckBox(
-            'Constrained Visvalingam (slow, try for high generalization rates)'
+            'Constrained Visvalingam (slow, preserves topology better)'
         )
         self.constrained_checkbox.setChecked(False)
         self.layout.addWidget(self.constrained_checkbox)
 
         # Dissolve small parts/holes checkbox
         self.dissolve_small_checkbox = QCheckBox(
-            'Dissolve small parts and holes (area < 2·d²)'
+            'Dissolve small parts and holes'
         )
         self.dissolve_small_checkbox.setChecked(False)
         self.layout.addWidget(self.dissolve_small_checkbox)
