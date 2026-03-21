@@ -25,6 +25,38 @@ from heapq import heappush, heappop, heapify
 # Shared geometry helpers (used by the cascade implementation)
 # ---------------------------------------------------------------------------
 
+
+def _crosses_any_vec(active, coords, lx, ly, rx, ry):
+    """
+    Vectorised proper-crossing test.
+
+    Check whether the chord (lx,ly)→(rx,ry) properly crosses any segment of
+    the current ring.  ``active`` is a boolean numpy array of length n; the
+    current ring segments are the consecutive pairs of active points.
+
+    The caller must have already cleared ``active[i]`` for the candidate point
+    being considered for removal, so that point's two segments are gone and the
+    new chord is checked in their place.
+
+    Adjacent segments sharing an endpoint with the chord cannot produce a
+    proper crossing (strict interior test), so no explicit exclusion is needed.
+    """
+    rem = np.where(active)[0]       # indices of remaining points, in order
+    if len(rem) < 2:
+        return False
+    ax = coords[rem[:-1], 0];  ay = coords[rem[:-1], 1]   # segment starts
+    bx = coords[rem[1:],  0];  by = coords[rem[1:],  1]   # segment ends
+
+    dx_lr = rx - lx;  dy_lr = ry - ly
+    d1 = (ax - lx) * dy_lr - (ay - ly) * dx_lr
+    d2 = (bx - lx) * dy_lr - (by - ly) * dx_lr
+
+    dx_ab = bx - ax;  dy_ab = by - ay
+    d3 = (lx - ax) * dy_ab - (ly - ay) * dx_ab
+    d4 = (rx - ax) * dy_ab - (ry - ay) * dx_ab
+
+    return bool(np.any((d1 * d2 < 0) & (d3 * d4 < 0)))
+
 def _weighted_area_scalar(ax, ay, bx, by, cx, cy):
     """Weighted triangle area for a single point triple (scalar version)."""
     area = abs((bx - ax) * (cy - ay) - (cx - ax) * (by - ay)) / 2
@@ -70,6 +102,81 @@ def _weighted_areas_vec(coords):
 # ---------------------------------------------------------------------------
 # Cascade (heap-based) implementation
 # ---------------------------------------------------------------------------
+
+def _visvalingam_cascade_constrained(coords, keep_count):
+    """
+    Constrained Visvalingam cascade: identical to the regular cascade but
+    skips any removal that would introduce a self-intersection in the ring.
+
+    Before accepting a point removal, the new chord (left → right) is tested
+    against every current segment of the ring.  If a proper crossing is found
+    the point's effective area is set to ∞ so it is never removed.
+
+    O(n²) worst-case, but guarantees a topologically valid output ring.
+    Use only when regular simplification would produce invalid geometry.
+    """
+    n = len(coords)
+
+    areas = np.full(n, np.inf)
+    interior_areas = _weighted_areas_vec(coords)
+    areas[1:-1] = interior_areas
+
+    heap = list(zip(areas[1:-1], range(1, n - 1)))
+    heap.append((np.inf, 0))
+    heap.append((np.inf, n - 1))
+    heapify(heap)
+
+    active  = np.ones(n, dtype=bool)   # active[i] = point still in ring
+    removed = set()
+    current_count = n
+
+    while heap and current_count > keep_count:
+        val, i = heappop(heap)
+
+        if i in removed:
+            continue
+        if val != areas[i]:
+            continue
+        if areas[i] == np.inf:
+            break
+
+        left = i - 1
+        while left in removed:
+            left -= 1
+        right = i + 1
+        while right in removed:
+            right += 1
+
+        lx, ly = coords[left,  0], coords[left,  1]
+        rx, ry = coords[right, 0], coords[right, 1]
+
+        # Temporarily mark i as inactive so _crosses_any_vec sees the
+        # ring as it would look after the removal.
+        active[i] = False
+        if _crosses_any_vec(active, coords, lx, ly, rx, ry):
+            # Removing i would create a crossing — lock it permanently.
+            active[i] = True
+            areas[i] = np.inf
+            heappush(heap, (np.inf, i))
+            continue
+
+        removed.add(i)
+        current_count -= 1
+        # active[i] already False — leave it
+
+        if 0 < left < n - 1:
+            new_area = _weighted_area_scalar(*coords[left - 1], *coords[left], *coords[right])
+            areas[left] = new_area
+            heappush(heap, (new_area, left))
+
+        if 0 < right < n - 1:
+            new_area = _weighted_area_scalar(*coords[left], *coords[right], *coords[right + 1])
+            areas[right] = new_area
+            heappush(heap, (new_area, right))
+
+    remaining = [i for i in range(n) if i not in removed]
+    return coords[remaining]
+
 
 def _visvalingam_cascade(coords, keep_count):
     """
@@ -167,7 +274,7 @@ def _visvalingam_vec(coords, keep_count):
 # Public API
 # ---------------------------------------------------------------------------
 
-def simplify_polygon(coords, percentage, cascade=False):
+def simplify_polygon(coords, percentage, cascade=False, constrained=False):
     """
     Simplify a closed polygon ring.
 
@@ -175,17 +282,22 @@ def simplify_polygon(coords, percentage, cascade=False):
     equals the first (closing duplicate included).  The first and last
     points are never removed.  At least 4 points are kept.
 
-    :param cascade: use the slower heap-cascade algorithm (default: False).
+    :param cascade:     use the slower heap-cascade algorithm (default: False).
+    :param constrained: use the crossing-guarded cascade that prevents
+                        self-intersections (default: False).  Implies cascade.
+                        Slower but guarantees a valid output ring.
     """
     n = len(coords)
     if n < 4:
         return coords
     keep_count = max(4, int(n * (1 - percentage / 100)))
+    if constrained:
+        return _visvalingam_cascade_constrained(coords, keep_count)
     fn = _visvalingam_cascade if cascade else _visvalingam_vec
     return fn(coords, keep_count)
 
 
-def simplify_arc(coords, percentage, cascade=False):
+def simplify_arc(coords, percentage, cascade=False, constrained=False):
     """
     Simplify an open arc between two fixed junction nodes.
 
@@ -193,11 +305,15 @@ def simplify_arc(coords, percentage, cascade=False):
     coords[-1] are the junction nodes and are never removed.  At least
     2 points are kept.
 
-    :param cascade: use the slower heap-cascade algorithm (default: False).
+    :param cascade:     use the slower heap-cascade algorithm (default: False).
+    :param constrained: use the crossing-guarded cascade (default: False).
+                        Implies cascade.  Slower but guarantees no crossings.
     """
     n = len(coords)
     if n <= 2:
         return coords
     keep_count = max(2, int(n * (1 - percentage / 100)))
+    if constrained:
+        return _visvalingam_cascade_constrained(coords, keep_count)
     fn = _visvalingam_cascade if cascade else _visvalingam_vec
     return fn(coords, keep_count)

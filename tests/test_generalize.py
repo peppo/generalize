@@ -33,6 +33,9 @@ _DATA_ROOT     = os.path.join(_PKG_ROOT, 'test_data')
 _NO_OVERLAP_DIR = os.path.join(_DATA_ROOT, 'no_overlap')
 _NO_OVERLAP    = os.path.join(_NO_OVERLAP_DIR, 'no_overlap.geojson')
 _NO_OVERLAP_EXPECTED = os.path.join(_NO_OVERLAP_DIR, 'no_overlap_generalized_expected.geojson')
+_INVERT_DIR    = os.path.join(_DATA_ROOT, 'invert')
+_INVERT        = os.path.join(_INVERT_DIR, 'invert.geojson')
+_INVERT2       = os.path.join(_INVERT_DIR, 'invert2.geojson')
 
 
 def _load_layer(path: str):
@@ -170,6 +173,74 @@ class TestNoOverlapTopology(unittest.TestCase):
             f'  shared={self.topo.shared_edge_count}  '
             f'boundary={self.topo.boundary_edge_count}  '
             f'total={len(self.topo.edges)}'
+        )
+
+
+class TestInvertValidGeometry(unittest.TestCase):
+    """
+    After generalizing invert.geojson at 90%, every output feature must be a
+    valid geometry (no self-intersections, no bowtie rings, etc.).
+
+    Aggressive simplification of a complex concave polygon can cause ring
+    inversion — simplified edges cross each other, producing a self-intersecting
+    (invalid) geometry that breaks downstream operations.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        from generalize.api import generalize_polygon_layer
+        layer = _load_layer(_INVERT)
+        features, _, _ = generalize_polygon_layer(
+            layer, percentage=90, add_to_project=False, constrained=True
+        )
+        cls.features = features
+
+    def test_all_features_are_valid(self):
+        """Every generalized feature must pass QGIS isGeosValid()."""
+        invalid = []
+        for f in self.features:
+            geom = f.geometry()
+            if not geom.isGeosValid():
+                fid = f.attributes()[0]
+                invalid.append(
+                    f'feature id={fid}: {geom.lastError()}'
+                )
+        self.assertEqual(
+            invalid, [],
+            'Invalid geometries after 90% generalization of invert.geojson:\n'
+            + '\n'.join(f'  {msg}' for msg in invalid),
+        )
+
+
+class TestInvert2ValidGeometry(unittest.TestCase):
+    """
+    After generalizing invert2.geojson at 90%, every output feature must be a
+    valid geometry (no self-intersections).
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        from generalize.api import generalize_polygon_layer
+        layer = _load_layer(_INVERT2)
+        features, _, _ = generalize_polygon_layer(
+            layer, percentage=90, add_to_project=False, constrained=True
+        )
+        cls.features = features
+
+    def test_all_features_are_valid(self):
+        """Every generalized feature must pass QGIS isGeosValid()."""
+        invalid = []
+        for f in self.features:
+            geom = f.geometry()
+            if not geom.isGeosValid():
+                fid = f.attributes()[0]
+                invalid.append(
+                    f'feature id={fid}: {geom.lastError()}'
+                )
+        self.assertEqual(
+            invalid, [],
+            'Invalid geometries after 90% generalization of invert2.geojson:\n'
+            + '\n'.join(f'  {msg}' for msg in invalid),
         )
 
 

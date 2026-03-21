@@ -12,7 +12,7 @@ _active_tasks = []
 
 
 class _GeneralizeTask(QgsTask):
-    def __init__(self, layer, percentage, iface, repair=True):
+    def __init__(self, layer, percentage, iface, repair=True, constrained=False):
         super().__init__(
             f"Generalizing '{layer.name()}' ({percentage}% reduction)",
             QgsTask.CanCancel,
@@ -21,6 +21,7 @@ class _GeneralizeTask(QgsTask):
         self.percentage = percentage
         self.iface = iface
         self.repair = repair
+        self.constrained = constrained
         # Capture layer metadata on the main thread before the task starts.
         self.crs_authid = layer.crs().authid()
         self.output_name = layer.name() + '_generalized'
@@ -43,6 +44,7 @@ class _GeneralizeTask(QgsTask):
                 self.percentage,
                 progress_callback=progress_callback,
                 add_to_project=False,
+                constrained=self.constrained,
             )
         except Exception as e:
             self.exception = e
@@ -141,6 +143,13 @@ class GeneralizeDialog(QDialog):
         self.repair_checkbox.setChecked(True)
         self.layout.addWidget(self.repair_checkbox)
 
+        # Constrained simplification checkbox
+        self.constrained_checkbox = QCheckBox(
+            'Constrained Visvalingam (slow, try for high generalization rates)'
+        )
+        self.constrained_checkbox.setChecked(False)
+        self.layout.addWidget(self.constrained_checkbox)
+
         # Buttons
         self.button_layout = QHBoxLayout()
         self.ok_button = QPushButton('OK')
@@ -170,7 +179,8 @@ class GeneralizeDialog(QDialog):
 
         percentage = self.slider.value()
         repair = self.repair_checkbox.isChecked()
-        task = _GeneralizeTask(layer, percentage, self.iface, repair=repair)
+        constrained = self.constrained_checkbox.isChecked()
+        task = _GeneralizeTask(layer, percentage, self.iface, repair=repair, constrained=constrained)
         _active_tasks.append(task)
 
         def _cleanup():

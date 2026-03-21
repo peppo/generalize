@@ -41,6 +41,7 @@ def generalize_polygon_layer(
     progress_callback=None,
     snap_tolerance: float = 0.0,
     add_to_project: bool = True,
+    constrained: bool = False,
 ):
     """
     Generalize a polygon layer using the topological Visvalingam algorithm.
@@ -58,6 +59,10 @@ def generalize_polygon_layer(
                               data has intermediate collinear vertices that prevent
                               shared-edge detection.  Default 0 (no preprocessing)
                               is correct for topologically perfect input.
+    :param constrained:      bool – when True, use the crossing-guarded cascade
+                              algorithm that prevents self-intersections.  Slower
+                              but guarantees valid output geometry at high
+                              generalization rates.  Default False.
     :return: (QgsVectorLayer, original_feature_count, new_feature_count)
     """
     if not isinstance(input_layer, QgsVectorLayer) \
@@ -124,9 +129,9 @@ def generalize_polygon_layer(
 
             is_loop = (edge.start_node == edge.end_node)
             if is_loop:
-                edge.coords = simplify_polygon(edge.coords, percentage)
+                edge.coords = simplify_polygon(edge.coords, percentage, constrained=constrained)
             else:
-                edge.coords = simplify_arc(edge.coords, percentage)
+                edge.coords = simplify_arc(edge.coords, percentage, constrained=constrained)
 
         _set_progress(W_TOPO + W_SIMP)
 
