@@ -3,9 +3,10 @@ Build a TopoLayer from a QgsVectorLayer and reconstruct QgsFeatures from it.
 
 Public API
 ----------
-snap_to_self(layer, tolerance)  -> QgsVectorLayer   (topological pre-processing)
-build(layer)                    -> TopoLayer
-to_qgs_features(topo)           -> list[QgsFeature]
+snap_to_self(layer, tolerance)   -> QgsVectorLayer   (topological pre-processing)
+build(layer)                     -> TopoLayer
+dissolve_small_rings(topo)       -> (n_parts, n_holes)
+to_qgs_features(topo)            -> list[QgsFeature]
 
 Algorithm overview
 ------------------
@@ -283,6 +284,125 @@ def build(layer: QgsVectorLayer, snap_tolerance: float = 0, progress_callback=No
     )
 
     return topo
+
+
+def dissolve_small_rings(topo: TopoLayer) -> tuple[int, int]:
+    """
+    Remove topology rings whose area is below the auto-scaled threshold
+    ``2 * d²``, where ``d`` is the global average edge-segment length across
+    all simplified edges.
+
+    The threshold is self-scaling: after aggressive generalisation the average
+    segment is longer, so the threshold is larger — tiny artefacts are dropped
+    proportionally to the generalisation level.
+
+    Two types of rings are dropped, always atomically so no gap or overlap is
+    created in the output:
+
+    * **Small holes** — an inner ring of a TopoPolygon whose area < threshold.
+      If a sibling TopoPolygon (an island whose outer ring shares the same
+      edge IDs) exists, it is dropped at the same time.
+
+    * **Small polygon parts** — the outer ring of a TopoPolygon whose area <
+      threshold.  Only dropped when the feature has at least one other polygon
+      part remaining.  If a parent TopoPolygon has this ring as a hole, that
+      hole is removed at the same time.
+
+    Returns ``(n_parts_dropped, n_holes_dropped)``.
+    """
+    # --- Compute global average segment length from simplified edges ----------
+    total_length = 0.0
+    total_segments = 0
+    for edge in topo.edges.values():
+        if len(edge.coords) >= 2:
+            diffs = np.diff(edge.coords, axis=0)
+            total_length += float(np.hypot(diffs[:, 0], diffs[:, 1]).sum())
+            total_segments += len(edge.coords) - 1
+
+    if total_segments == 0:
+        return 0, 0
+
+    d = total_length / total_segments
+    threshold = 2.0 * d * d
+
+    # --- Helper: shoelace area of a closed ring (numpy) ----------------------
+    def _area(ring: TopoRing) -> float:
+        coords = ring.iter_coords_numpy(topo.edges)
+        if len(coords) < 4:
+            return 0.0
+        x, y = coords[:-1, 0], coords[:-1, 1]
+        xn, yn = coords[1:, 0], coords[1:, 1]
+        return abs(float(np.sum(x * yn - xn * y))) / 2.0
+
+    # --- Build fast lookups --------------------------------------------------
+    # frozenset(edge_ids) → polygon dict-key, for outer rings
+    outer_key_to_pid: dict[frozenset, int] = {
+        frozenset(eid for eid, _ in poly.outer_ring.half_edges): pid
+        for pid, poly in topo.polygons.items()
+    }
+    # frozenset(edge_ids) → (parent polygon dict-key, TopoRing), for holes
+    hole_key_to_parent: dict[frozenset, tuple[int, TopoRing]] = {}
+    for pid, poly in topo.polygons.items():
+        for hole in poly.inner_rings:
+            key = frozenset(eid for eid, _ in hole.half_edges)
+            hole_key_to_parent[key] = (pid, hole)
+
+    # Group polygon dict-keys by feature_id
+    feature_pids: dict[int, list[int]] = defaultdict(list)
+    for pid, poly in topo.polygons.items():
+        feature_pids[poly.feature_id].append(pid)
+
+    pids_to_remove: set[int] = set()
+    holes_to_drop: dict[int, set[TopoRing]] = defaultdict(set)  # pid → holes
+
+    # --- Phase 1: small holes → drop hole + twin island ----------------------
+    for pid, poly in topo.polygons.items():
+        for hole in poly.inner_rings:
+            if _area(hole) < threshold:
+                holes_to_drop[pid].add(hole)
+                twin_pid = outer_key_to_pid.get(
+                    frozenset(eid for eid, _ in hole.half_edges)
+                )
+                if twin_pid is not None:
+                    pids_to_remove.add(twin_pid)
+
+    # --- Phase 2: small outer rings not already removed ----------------------
+    # Sort smallest-first so the smallest parts are dropped first; the
+    # "at least one part per feature" guard then naturally keeps the largest.
+    candidates = sorted(
+        (_area(poly.outer_ring), pid)
+        for pid, poly in topo.polygons.items()
+        if pid not in pids_to_remove
+    )
+    for area, pid in candidates:
+        if area >= threshold:
+            break
+        if pid in pids_to_remove:
+            continue
+        poly = topo.polygons[pid]
+        remaining = [p for p in feature_pids[poly.feature_id]
+                     if p not in pids_to_remove]
+        if len(remaining) <= 1:
+            continue  # never drop the last part of a feature
+        pids_to_remove.add(pid)
+        # Also remove the corresponding hole from the parent (if any)
+        outer_key = frozenset(eid for eid, _ in poly.outer_ring.half_edges)
+        if outer_key in hole_key_to_parent:
+            parent_pid, parent_hole = hole_key_to_parent[outer_key]
+            holes_to_drop[parent_pid].add(parent_hole)
+
+    # --- Apply removals ------------------------------------------------------
+    n_holes = 0
+    for pid, drop_set in holes_to_drop.items():
+        poly = topo.polygons[pid]
+        before = len(poly.inner_rings)
+        poly.inner_rings = [h for h in poly.inner_rings if h not in drop_set]
+        n_holes += before - len(poly.inner_rings)
+
+    for pid in pids_to_remove:
+        del topo.polygons[pid]
+
+    return len(pids_to_remove), n_holes
 
 
 def to_qgs_features(topo: TopoLayer) -> list[QgsFeature]:

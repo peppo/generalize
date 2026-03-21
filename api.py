@@ -3,7 +3,7 @@ import time
 import processing
 from qgis.core import QgsVectorLayer, QgsWkbTypes, QgsProject, QgsMessageLog, Qgis
 
-from .topology_builder import build, remove_collinear_vertices, snap_to_self, to_qgs_features
+from .topology_builder import build, dissolve_small_rings, remove_collinear_vertices, snap_to_self, to_qgs_features
 from .visvalingam import simplify_arc, simplify_polygon
 
 LOG_TAG = "Generalize"
@@ -42,6 +42,7 @@ def generalize_polygon_layer(
     snap_tolerance: float = 0.0,
     add_to_project: bool = True,
     constrained: bool = False,
+    dissolve_small: bool = False,
 ):
     """
     Generalize a polygon layer using the topological Visvalingam algorithm.
@@ -63,6 +64,12 @@ def generalize_polygon_layer(
                               algorithm that prevents self-intersections.  Slower
                               but guarantees valid output geometry at high
                               generalization rates.  Default False.
+    :param dissolve_small:   bool – when True, drop polygon parts and holes
+                              whose area < 2·d² (d = global average segment
+                              length after simplification).  Parts and their
+                              corresponding holes are removed atomically so no
+                              gap or overlap is introduced.  At least one part
+                              per feature is always preserved.  Default False.
     :return: (QgsVectorLayer, original_feature_count, new_feature_count)
     """
     if not isinstance(input_layer, QgsVectorLayer) \
@@ -241,6 +248,14 @@ def generalize_polygon_layer(
         _log(f"Simplification done in {time.perf_counter() - t2:.1f}s — "
              f"{total_vertices:,} → {simplified_vertices:,} vertices "
              f"({100 * (1 - simplified_vertices / total_vertices):.1f}% reduction)")
+
+        # --- 4.5. Drop small rings / parts (dissolve_small mode) ---
+        if dissolve_small:
+            t_ds = time.perf_counter()
+            n_parts, n_holes = dissolve_small_rings(topo)
+            if n_parts or n_holes:
+                _log(f"Dissolve small: removed {n_parts} part(s) and "
+                     f"{n_holes} hole(s) in {time.perf_counter() - t_ds:.1f}s")
 
         # --- 5. Collect QgsFeatures from the simplified topology ---
         _log("Reconstructing features …")

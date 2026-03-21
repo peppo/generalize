@@ -654,5 +654,81 @@ class TestFranceValidGeometry(unittest.TestCase):
         )
 
 
+class TestDissolveSmall(unittest.TestCase):
+    """
+    Regression test for the dissolve_small option.
+
+    Neureichenau (too_few_points.geojson) is a MultiPolygon with 17 parts at
+    50% generalisation.  Several of those parts are tiny island polygons whose
+    area falls below the 2·d² threshold.  With dissolve_small=True they must
+    be dropped from the topology before reconstruction so that the output has
+    fewer parts, all geometries remain valid, and at least one part per feature
+    is preserved.
+    """
+
+    PERCENTAGE = 50
+
+    @classmethod
+    def setUpClass(cls):
+        from generalize.api import generalize_polygon_layer
+        layer = _load_layer(_TOO_FEW_POINTS)
+
+        features_plain, _, _ = generalize_polygon_layer(
+            layer, percentage=cls.PERCENTAGE, add_to_project=False,
+            constrained=True, dissolve_small=False,
+        )
+        cls.features_plain = features_plain
+
+        features_dissolved, _, _ = generalize_polygon_layer(
+            layer, percentage=cls.PERCENTAGE, add_to_project=False,
+            constrained=True, dissolve_small=True,
+        )
+        cls.features_dissolved = features_dissolved
+
+    def _part_count(self, features):
+        """Return total number of polygon parts across all features."""
+        from qgis.core import QgsWkbTypes
+        total = 0
+        for f in features:
+            geom = f.geometry()
+            if QgsWkbTypes.isMultiType(geom.wkbType()):
+                total += geom.constGet().numGeometries()
+            else:
+                total += 1
+        return total
+
+    def test_dissolve_small_reduces_part_count(self):
+        """dissolve_small=True must produce fewer polygon parts than False."""
+        plain_parts    = self._part_count(self.features_plain)
+        dissolved_parts = self._part_count(self.features_dissolved)
+        self.assertLess(
+            dissolved_parts, plain_parts,
+            f'Expected fewer parts with dissolve_small=True '
+            f'(got {dissolved_parts} vs {plain_parts} without dissolve_small)',
+        )
+
+    def test_dissolve_small_all_features_valid(self):
+        """Every feature produced with dissolve_small=True must be valid."""
+        invalid = []
+        for f in self.features_dissolved:
+            geom = f.geometry()
+            if not geom.isGeosValid():
+                idx = f.fieldNameIndex('gml_id')
+                fid = f.attribute(idx) if idx >= 0 else f.id()
+                invalid.append(f'  {fid}: {geom.lastError()}')
+        self.assertEqual(
+            invalid, [],
+            'Invalid geometries after dissolve_small=True generalisation:\n'
+            + '\n'.join(invalid),
+        )
+
+    def test_dissolve_small_at_least_one_part_per_feature(self):
+        """Every feature must have at least one remaining polygon part."""
+        self.assertGreater(
+            len(self.features_dissolved), 0,
+            'All features were dissolved — at least one must remain.',
+        )
+
+
 if __name__ == '__main__':
     unittest.main(verbosity=2)
