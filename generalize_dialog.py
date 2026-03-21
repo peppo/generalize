@@ -12,7 +12,7 @@ _active_tasks = []
 
 
 class _GeneralizeTask(QgsTask):
-    def __init__(self, layer, percentage, iface, repair=True, constrained=False):
+    def __init__(self, layer, percentage, iface, repair=True, constrained=False, dissolve_small=False):
         super().__init__(
             f"Generalizing '{layer.name()}' ({percentage}% reduction)",
             QgsTask.CanCancel,
@@ -22,6 +22,7 @@ class _GeneralizeTask(QgsTask):
         self.iface = iface
         self.repair = repair
         self.constrained = constrained
+        self.dissolve_small = dissolve_small
         # Capture layer metadata on the main thread before the task starts.
         self.crs_authid = layer.crs().authid()
         self.output_name = layer.name() + '_generalized'
@@ -45,6 +46,7 @@ class _GeneralizeTask(QgsTask):
                 progress_callback=progress_callback,
                 add_to_project=False,
                 constrained=self.constrained,
+                dissolve_small=self.dissolve_small,
             )
         except Exception as e:
             self.exception = e
@@ -150,6 +152,13 @@ class GeneralizeDialog(QDialog):
         self.constrained_checkbox.setChecked(False)
         self.layout.addWidget(self.constrained_checkbox)
 
+        # Dissolve small parts/holes checkbox
+        self.dissolve_small_checkbox = QCheckBox(
+            'Dissolve small parts and holes (area < 2·d²)'
+        )
+        self.dissolve_small_checkbox.setChecked(False)
+        self.layout.addWidget(self.dissolve_small_checkbox)
+
         # Buttons
         self.button_layout = QHBoxLayout()
         self.ok_button = QPushButton('OK')
@@ -180,7 +189,8 @@ class GeneralizeDialog(QDialog):
         percentage = self.slider.value()
         repair = self.repair_checkbox.isChecked()
         constrained = self.constrained_checkbox.isChecked()
-        task = _GeneralizeTask(layer, percentage, self.iface, repair=repair, constrained=constrained)
+        dissolve_small = self.dissolve_small_checkbox.isChecked()
+        task = _GeneralizeTask(layer, percentage, self.iface, repair=repair, constrained=constrained, dissolve_small=dissolve_small)
         _active_tasks.append(task)
 
         def _cleanup():

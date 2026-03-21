@@ -654,6 +654,29 @@ class TestFranceValidGeometry(unittest.TestCase):
         )
 
 
+class TestDissolveSmallUnconstrained(unittest.TestCase):
+    """
+    Regression test: dissolve_small=True must not crash when constrained=False.
+
+    dissolve_small_rings() used a set[TopoRing] internally.  TopoRing is a
+    @dataclass which auto-generates __eq__, which sets __hash__ = None —
+    making the class unhashable.  Adding a TopoRing to a set therefore raises
+    "unhashable type: 'TopoRing'".  This test was introduced to pin that fix.
+    """
+
+    PERCENTAGE = 90
+
+    def test_does_not_raise(self):
+        from generalize.api import generalize_polygon_layer
+        layer = _load_layer(_TOO_FEW_POINTS)
+        # Must not raise — before the fix this raised "unhashable type: 'TopoRing'"
+        features, _, _ = generalize_polygon_layer(
+            layer, percentage=self.PERCENTAGE, add_to_project=False,
+            constrained=False, dissolve_small=True,
+        )
+        self.assertIsNotNone(features)
+
+
 class TestDissolveSmall(unittest.TestCase):
     """
     Regression test for the dissolve_small option.

@@ -353,13 +353,13 @@ def dissolve_small_rings(topo: TopoLayer) -> tuple[int, int]:
         feature_pids[poly.feature_id].append(pid)
 
     pids_to_remove: set[int] = set()
-    holes_to_drop: dict[int, set[TopoRing]] = defaultdict(set)  # pid → holes
+    holes_to_drop: dict[int, set[int]] = defaultdict(set)  # pid → set of id(ring)
 
     # --- Phase 1: small holes → drop hole + twin island ----------------------
     for pid, poly in topo.polygons.items():
         for hole in poly.inner_rings:
             if _area(hole) < threshold:
-                holes_to_drop[pid].add(hole)
+                holes_to_drop[pid].add(id(hole))
                 twin_pid = outer_key_to_pid.get(
                     frozenset(eid for eid, _ in hole.half_edges)
                 )
@@ -389,14 +389,14 @@ def dissolve_small_rings(topo: TopoLayer) -> tuple[int, int]:
         outer_key = frozenset(eid for eid, _ in poly.outer_ring.half_edges)
         if outer_key in hole_key_to_parent:
             parent_pid, parent_hole = hole_key_to_parent[outer_key]
-            holes_to_drop[parent_pid].add(parent_hole)
+            holes_to_drop[parent_pid].add(id(parent_hole))
 
     # --- Apply removals ------------------------------------------------------
     n_holes = 0
-    for pid, drop_set in holes_to_drop.items():
+    for pid, drop_ids in holes_to_drop.items():
         poly = topo.polygons[pid]
         before = len(poly.inner_rings)
-        poly.inner_rings = [h for h in poly.inner_rings if h not in drop_set]
+        poly.inner_rings = [h for h in poly.inner_rings if id(h) not in drop_ids]
         n_holes += before - len(poly.inner_rings)
 
     for pid in pids_to_remove:
