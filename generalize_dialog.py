@@ -1,6 +1,6 @@
 import processing
 
-from qgis.PyQt.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QComboBox, QSlider, QPushButton, QMessageBox, QCheckBox
+from qgis.PyQt.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QComboBox, QSlider, QDoubleSpinBox, QPushButton, QMessageBox, QCheckBox
 from qgis.PyQt.QtCore import Qt
 from qgis.core import QgsProject, QgsVectorLayer, QgsWkbTypes, QgsTask, QgsApplication, QgsMessageLog, Qgis
 
@@ -16,6 +16,7 @@ try:
     _PolygonGeometry = QgsWkbTypes.GeometryType.PolygonGeometry   # QGIS 4
 except AttributeError:
     _PolygonGeometry = QgsWkbTypes.PolygonGeometry                # QGIS 3
+
 
 from .api import generalize_polygon_layer, _make_layer
 
@@ -141,14 +142,30 @@ class GeneralizeDialog(QDialog):
         self.layout.addWidget(self.layer_label)
         self.layout.addWidget(self.layer_combo)
 
-        # Percentage slider
-        self.slider_label = QLabel('Reduction Percentage: 50%')
+        # Percentage slider + spinbox
+        self.slider_label = QLabel('Reduction Percentage:')
         self.slider = QSlider(_Qt_Horizontal)
         self.slider.setMinimum(0)
-        self.slider.setMaximum(100)
+        self.slider.setMaximum(99)
         self.slider.setValue(50)
-        self.slider.valueChanged.connect(self.update_label)
-        self.layout.addWidget(self.slider_label)
+
+        self.pct_spinbox = QDoubleSpinBox()
+        self.pct_spinbox.setMinimum(0.0)
+        self.pct_spinbox.setMaximum(99.9)
+        self.pct_spinbox.setDecimals(1)
+        self.pct_spinbox.setSingleStep(0.1)
+        self.pct_spinbox.setSuffix(' %')
+        self.pct_spinbox.setValue(50.0)
+
+        self.slider.valueChanged.connect(self._on_slider_changed)
+        self.pct_spinbox.valueChanged.connect(self._on_spinbox_changed)
+
+        self.label_row = QHBoxLayout()
+        self.label_row.addWidget(self.slider_label)
+        self.label_row.addStretch()
+        self.label_row.addWidget(self.pct_spinbox)
+
+        self.layout.addLayout(self.label_row)
         self.layout.addWidget(self.slider)
 
         # Repair geometry checkbox
@@ -181,8 +198,15 @@ class GeneralizeDialog(QDialog):
             if isinstance(layer, QgsVectorLayer) and layer.geometryType() == _PolygonGeometry:
                 self.layer_combo.addItem(layer.name(), layer)
 
-    def update_label(self, value):
-        self.slider_label.setText(f'Reduction Percentage: {value}%')
+    def _on_slider_changed(self, value):
+        self.pct_spinbox.blockSignals(True)
+        self.pct_spinbox.setValue(99.9 if value == 99 else float(value))
+        self.pct_spinbox.blockSignals(False)
+
+    def _on_spinbox_changed(self, value):
+        self.slider.blockSignals(True)
+        self.slider.setValue(99 if value >= 99.0 else int(round(value)))
+        self.slider.blockSignals(False)
 
     def accept(self):
         layer = self.layer_combo.currentData()
@@ -190,7 +214,7 @@ class GeneralizeDialog(QDialog):
             QMessageBox.warning(self, 'Error', 'No layer selected.')
             return
 
-        percentage = self.slider.value()
+        percentage = self.pct_spinbox.value()
         repair = self.repair_checkbox.isChecked()
         dissolve_small = self.dissolve_small_checkbox.isChecked()
         task = _GeneralizeTask(layer, percentage, self.iface, repair=repair, dissolve_small=dissolve_small)

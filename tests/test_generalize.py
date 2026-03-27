@@ -908,8 +908,13 @@ class TestDialogSmoke(unittest.TestCase):
         iface = MagicMock()
         dlg = GeneralizeDialog(iface)
         self.assertEqual(dlg.slider.minimum(), 0)
-        self.assertEqual(dlg.slider.maximum(), 100)
+        self.assertEqual(dlg.slider.maximum(), 99)
         self.assertEqual(dlg.slider.value(), 50)
+        self.assertAlmostEqual(dlg.pct_spinbox.value(), 50.0)
+        self.assertAlmostEqual(dlg.pct_spinbox.maximum(), 99.9)
+        # Slider position 99 must map to 99.9%, not 99.0%
+        dlg.slider.setValue(99)
+        self.assertAlmostEqual(dlg.pct_spinbox.value(), 99.9)
         self.assertTrue(dlg.repair_checkbox.isChecked())
         self.assertFalse(dlg.dissolve_small_checkbox.isChecked())
 
