@@ -1,7 +1,7 @@
 [general]
 name=Generalize Polygons
 description=Topology-preserving polygon simplification using the weighted Visvalingam algorithm — no slivers, no gaps.
-version=0.5.1
+version=0.5.2-SNAPSHOT
 qgisMinimumVersion=3.40
 qgisMaximumVersion=3.99
 author=Peppo Herney
@@ -21,11 +21,6 @@ about=Reduces the vertex count of polygon layers while preserving shape and topo
     MapShaper (mbloch/mapshaper). Triangle areas are weighted by the angle at the
     centre vertex, so nearly-collinear points are removed first while
     geometrically significant vertices are protected.
-
-    Processing runs as a QGIS background task, so the interface stays responsive.
-    A progress bar in the status area tracks the three internal phases (topology
-    build, simplification, reconstruction), and the task can be cancelled at any
-    time via the QGIS task manager.
 
 [processing]
 hasProcessingProvider=no

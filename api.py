@@ -40,8 +40,7 @@ def generalize_polygon_layer(
     output_layer=None,
     progress_callback=None,
     snap_tolerance: float = 0.0,
-    add_to_project: bool = True,
-    constrained: bool = False,
+    add_to_project: bool = True,    
     dissolve_small: bool = False,
 ):
     """
@@ -60,10 +59,6 @@ def generalize_polygon_layer(
                               data has intermediate collinear vertices that prevent
                               shared-edge detection.  Default 0 (no preprocessing)
                               is correct for topologically perfect input.
-    :param constrained:      bool – when True, use the crossing-guarded cascade
-                              algorithm that prevents self-intersections.  Slower
-                              but guarantees valid output geometry at high
-                              generalization rates.  Default False.
     :param dissolve_small:   bool – when True, drop polygon parts and holes
                               whose area < 2·d² (d = global average segment
                               length after simplification).  Parts and their
@@ -103,13 +98,8 @@ def generalize_polygon_layer(
 
     # Progress weights based on measured timing on gemeinden_bayern (50%):
     #   unconstrained: topology 96 %, simplification  3 %, reconstruction 1 %
-    #   constrained:   topology  5 %, simplification 93 %, reconstruction 2 %
-    if constrained:
-        W_TOPO =  5.0
-        W_SIMP = 93.0
-    else:
-        W_TOPO = 96.0
-        W_SIMP =  3.0
+    W_TOPO = 96.0
+    W_SIMP =  3.0
 
     def _set_progress(pct):
         """Update progress; raise _Cancelled if the callback signals cancellation."""
@@ -131,106 +121,9 @@ def generalize_polygon_layer(
              f"{total_edges} edges, {total_vertices:,} vertices")
         _set_progress(W_TOPO)
 
-        # --- 3. Build constraint map (constrained mode only) ---
-        # For each edge, collect the original coords of:
-        #   (a) all OTHER rings in the same polygon part (cross-ring: outer ↔ hole)
-        #   (b) all OTHER arcs in the same ring          (cross-arc: sibling arcs)
-        #   (c) all rings of OTHER parts of the same MultiPolygon feature
-        #                                                (cross-part: part separation)
-        # All sets are passed as static arrays to the crossing guard so that
-        # simplified chords cannot cross any of these boundaries.
         edge_other_rings: dict[int, list] = {}
-        if constrained:
-            from collections import defaultdict as _defaultdict
-            t3 = time.perf_counter()
 
-            # Cache original edge coords before any simplification.
-            edge_coord_cache: dict[int, object] = {
-                eid: e.coords.copy() for eid, e in topo.edges.items()
-            }
-
-            # Cache full ring coord arrays (original, before any simplification).
-            ring_coord_cache: dict[int, object] = {}
-            for poly in topo.polygons.values():
-                for ring in [poly.outer_ring] + poly.inner_rings:
-                    rid = id(ring)
-                    if rid not in ring_coord_cache:
-                        ring_coord_cache[rid] = ring.iter_coords_numpy(topo.edges)
-
-            # (c) Group parts by feature_id to build cross-part coord lists.
-            feature_parts: dict = _defaultdict(list)
-            for poly in topo.polygons.values():
-                feature_parts[poly.feature_id].append(poly)
-
-            # For each part, collect ring coord arrays from all OTHER parts of
-            # the same feature.
-            part_cross_part_coords: dict = {}   # id(poly) → list[np.ndarray]
-            for _, parts in feature_parts.items():
-                if len(parts) == 1:
-                    part_cross_part_coords[id(parts[0])] = []
-                    continue
-                all_part_ring_coords = {
-                    id(p): [
-                        ring_coord_cache[id(r)]
-                        for r in [p.outer_ring] + p.inner_rings
-                    ]
-                    for p in parts
-                }
-                for poly in parts:
-                    part_cross_part_coords[id(poly)] = [
-                        arr
-                        for pid, coords_list in all_part_ring_coords.items()
-                        if pid != id(poly)
-                        for arr in coords_list
-                    ]
-
-            for poly in topo.polygons.values():
-                all_rings = [poly.outer_ring] + poly.inner_rings
-                cross_part_coords = part_cross_part_coords[id(poly)]
-
-                for ring_idx, ring in enumerate(all_rings):
-                    # (a) Cross-ring constraints.
-                    cross_ring_coords = [
-                        ring_coord_cache[id(r)]
-                        for j, r in enumerate(all_rings) if j != ring_idx
-                    ]
-                    # (b) Sibling arc ids for this ring.
-                    sibling_arc_ids = [eid for eid, _ in ring.half_edges]
-
-                    for edge_id, _ in ring.half_edges:
-                        if edge_id not in edge_other_rings:
-                            edge_other_rings[edge_id] = (set(), [])
-                        seen, lst = edge_other_rings[edge_id]
-
-                        # Add cross-ring coords.
-                        for arr in cross_ring_coords:
-                            arr_key = id(arr)
-                            if arr_key not in seen:
-                                seen.add(arr_key)
-                                lst.append(arr)
-
-                        # Add sibling arc coords (cross-arc constraint).
-                        for sib_id in sibling_arc_ids:
-                            if sib_id == edge_id:
-                                continue
-                            arr = edge_coord_cache[sib_id]
-                            arr_key = id(arr)
-                            if arr_key not in seen:
-                                seen.add(arr_key)
-                                lst.append(arr)
-
-                        # Add other-part coords (cross-part constraint).
-                        for arr in cross_part_coords:
-                            arr_key = id(arr)
-                            if arr_key not in seen:
-                                seen.add(arr_key)
-                                lst.append(arr)
-
-            # Unwrap the (seen, lst) tuples.
-            edge_other_rings = {eid: lst for eid, (_, lst) in edge_other_rings.items()}
-            _log(f"Constraint map built in {time.perf_counter() - t3:.1f}s")
-
-        # --- 4. Simplify every edge exactly once ---
+        # --- 3. Simplify every edge exactly once ---
         _log(f"Simplifying {total_edges} edges …")
         t2 = time.perf_counter()
         for i, edge in enumerate(edges):
@@ -239,12 +132,10 @@ def generalize_polygon_layer(
             other_rings = edge_other_rings.get(edge.id, [])
             is_loop = (edge.start_node == edge.end_node)
             if is_loop:
-                edge.coords = simplify_polygon(edge.coords, percentage,
-                                               constrained=constrained,
+                edge.coords = simplify_polygon(edge.coords, percentage,                                               
                                                other_rings=other_rings)
             else:
                 edge.coords = simplify_arc(edge.coords, percentage,
-                                           constrained=constrained,
                                            other_rings=other_rings)
 
         _set_progress(W_TOPO + W_SIMP)
@@ -254,7 +145,7 @@ def generalize_polygon_layer(
              f"{total_vertices:,} → {simplified_vertices:,} vertices "
              f"({100 * (1 - simplified_vertices / total_vertices):.1f}% reduction)")
 
-        # --- 4.5. Drop small rings / parts (dissolve_small mode) ---
+        # --- 4. Drop small rings / parts (dissolve_small mode) ---
         if dissolve_small:
             t_ds = time.perf_counter()
             n_parts, n_holes = dissolve_small_rings(topo)
@@ -284,29 +175,19 @@ def generalize_polygon_layer(
         _log(f"Warning: {skipped} feature(s) collapsed to empty geometry and were skipped.")
 
     # --- 5. Post-simplification validity check (and repair in constrained mode) ---
-    # The per-arc constraint prevents most self-intersections, but cannot cover
-    # all edge cases — e.g. two parts of a MultiPolygon that originally touch
-    # at a single junction node can end up with slightly overlapping simplified
-    # shapes (both sides add chords near the junction point).  In constrained
-    # mode we apply makeValid() as a safety net for any remaining invalid
-    # geometry.  makeValid() is cheap (no-op for already-valid geometry) and
-    # produces minimal geometry changes (GEOS "structure" method).
     invalid_after = 0
     repaired = 0
     for feat in features:
         geom = feat.geometry()
         if geom.isGeosValid():
             continue
-        invalid_after += 1
-        if constrained:
-            fixed = geom.makeValid()
-            if not fixed.isNull() and fixed.area() > 0:
-                feat.setGeometry(fixed)
-                repaired += 1
+        invalid_after += 1  
+        fixed = geom.makeValid()
+        if not fixed.isNull() and fixed.area() > 0:
+            feat.setGeometry(fixed)
+            repaired += 1
     if invalid_after == 0:
         _log(f"Post-simplification check: all {new_count} output geometries are valid.")
-    elif constrained:
-        _log(f"Post-simplification check: {invalid_after} geometry(s) repaired with makeValid().")
     else:
         _log(f"Post-simplification check: {invalid_after} of {new_count} feature(s) have invalid geometry.")
 
