@@ -44,6 +44,7 @@ _FRANCE                 = os.path.join(_DATA_ROOT, 'france',                  'c
 _UNTRASRIED             = os.path.join(_DATA_ROOT, 'untrasried',              'untrasried.geojson')
 _TOO_FEW_POINTS         = os.path.join(_DATA_ROOT, 'too_few_points',         'too_few_points.geojson')
 _SELF_INTERSECTION      = os.path.join(_DATA_ROOT, 'self_intersection',       'self_intersection.geojson')
+_SLIVER2               = os.path.join(_DATA_ROOT, 'sliver2',              'sliver2.geojson')
 
 
 def _load_layer(path: str):
@@ -199,7 +200,7 @@ class TestInvertValidGeometry(unittest.TestCase):
         from generalize.api import generalize_polygon_layer
         layer = _load_layer(_INVERT)
         features, _, _ = generalize_polygon_layer(
-            layer, percentage=90, add_to_project=False, constrained=True
+            layer, percentage=90, add_to_project=False
         )
         cls.features = features
 
@@ -239,7 +240,7 @@ class TestIslandIntersectValidGeometry(unittest.TestCase):
         from generalize.api import generalize_polygon_layer
         layer = _load_layer(_ISLAND)
         features, _, _ = generalize_polygon_layer(
-            layer, percentage=90, add_to_project=False, constrained=True
+            layer, percentage=90, add_to_project=False
         )
         cls.features = features
 
@@ -271,7 +272,7 @@ class TestInvert2ValidGeometry(unittest.TestCase):
         from generalize.api import generalize_polygon_layer
         layer = _load_layer(_INVERT2)
         features, _, _ = generalize_polygon_layer(
-            layer, percentage=90, add_to_project=False, constrained=True
+            layer, percentage=90, add_to_project=False
         )
         cls.features = features
 
@@ -314,7 +315,6 @@ class TestTooFewPointsValidGeometry(unittest.TestCase):
         layer = _load_layer(_TOO_FEW_POINTS)
         features, _, _ = generalize_polygon_layer(
             layer, percentage=cls.PERCENTAGE, add_to_project=False,
-            constrained=True,
         )
         cls.features = features
 
@@ -356,8 +356,7 @@ class TestSelfIntersectionValidGeometry(unittest.TestCase):
         from generalize.api import generalize_polygon_layer
         layer = _load_layer(_SELF_INTERSECTION)
         features, _, _ = generalize_polygon_layer(
-            layer, percentage=cls.PERCENTAGE, add_to_project=False,
-            constrained=True,
+            layer, percentage=cls.PERCENTAGE, add_to_project=False            
         )
         cls.features = features
 
@@ -399,7 +398,6 @@ class TestGemeindenBayernValidGeometry(unittest.TestCase):
         layer = _load_layer(_GEMEINDEN_BAYERN)
         features, _, _ = generalize_polygon_layer(
             layer, percentage=cls.PERCENTAGE, add_to_project=False,
-            constrained=True,
         )
         cls.features = features
 
@@ -450,6 +448,150 @@ class TestGemeindenBayernValidGeometry(unittest.TestCase):
         )
 
 
+@pytest.mark.slow
+class TestGemeindenBayernNoSliver(unittest.TestCase):
+    """
+    After generalizing gemeinden_bayern at 90% — with both the fast
+    (unconstrained) and the constrained algorithm — adjacent municipalities
+    must still share a common boundary.
+
+    The topology invariant guarantees this: every shared edge is simplified
+    exactly once and referenced by both neighbours, so the simplified
+    boundary is always identical on both sides.  A sliver (gap or overlap)
+    would appear as a GeometryCollection intersection between two features
+    that should share a pure line.
+
+    For each adjacent pair (distance ≤ 1 m) the intersection must be either:
+      • PointGeometry   — features touch at a corner only (valid)
+      • LineGeometry    — features share a common edge (ideal)
+    A GeometryCollection (mixed line + isolated points) or a PolygonGeometry
+    (overlap) indicates a broken shared boundary.
+    """
+
+    PERCENTAGE = 90
+
+    @classmethod
+    def setUpClass(cls):
+        from generalize.api import generalize_polygon_layer
+        layer = _load_layer(_GEMEINDEN_BAYERN)
+
+        cls.features, _, _ = generalize_polygon_layer(
+            layer, percentage=cls.PERCENTAGE, add_to_project=False,
+        )
+
+    @staticmethod
+    def _find_slivers(features, valid_only=False):
+        """
+        Return a list of descriptions for adjacent feature pairs whose
+        intersection has non-zero polygon area (a real overlap / sliver).
+
+        A GeometryCollection whose area is 0 (e.g. a mix of line segments and
+        corner points at 3-way junctions) is not flagged -- only actual
+        polygon-area overlaps matter.
+
+        Parameters
+        ----------
+        features   : list of QgsFeature
+        valid_only : when True, skip pairs that include an invalid (self-
+                     intersecting) feature.  Use this for the unconstrained
+                     mode where self-intersecting features are expected and
+                     would otherwise produce spurious GEOS polygon results.
+        """
+        from qgis.core import QgsSpatialIndex
+        index = QgsSpatialIndex()
+        by_id = {}
+        for f in features:
+            index.addFeature(f)
+            by_id[f.id()] = f
+
+        if valid_only:
+            valid = {f.id(): f.geometry().isGeosValid() for f in features}
+
+        slivers = []
+        checked = set()
+        for f in features:
+            fid = f.id()
+            if valid_only and not valid.get(fid, True):
+                continue
+            for cid in index.intersects(f.geometry().boundingBox()):
+                if cid <= fid or (fid, cid) in checked:
+                    continue
+                checked.add((fid, cid))
+                if valid_only and not valid.get(cid, True):
+                    continue
+                g1 = f.geometry()
+                g2 = by_id[cid].geometry()
+                if g1.distance(g2) > 1.0:   # not adjacent
+                    continue
+                shared = g1.intersection(g2)
+                if shared.isEmpty():
+                    continue
+                area = shared.area()
+                if area > 0:
+                    slivers.append(
+                        f'features {fid} and {cid}: '
+                        f'intersection area={area:.6f}'
+                    )
+        return slivers
+
+    def test_no_sliver(self):
+        slivers = self._find_slivers(self.features)
+        self.assertEqual(
+            slivers, [],
+            f'Slivers after {self.PERCENTAGE}% generalization '
+            f'of gemeinden_bayern ({len(slivers)} pair(s)):\n'
+            + '\n'.join(f'  {s}' for s in slivers[:10]),
+        )
+
+
+class TestSliver2NoSliver(unittest.TestCase):
+    """
+    Regression test for the Haidmühle/Grainet Forest area.
+
+    """
+
+    PERCENTAGE = 90
+
+    @classmethod
+    def setUpClass(cls):
+        from generalize.api import generalize_polygon_layer
+        layer = _load_layer(_SLIVER2)
+        cls.features, _, _ = generalize_polygon_layer(
+            layer, percentage=cls.PERCENTAGE, add_to_project=False,
+        )
+
+    @unittest.expectedFailure
+    def test_no_sliver(self):
+        # The municipality and forest-district boundaries were digitised from
+        # different sources with coordinate mismatches of several metres.
+        # The topology builder cannot detect shared edges across sources, so
+        # both sides are simplified independently and overlaps appear.
+        # Expected to fail until the input is pre-snapped or the algorithm
+        # handles non-topological shared boundaries.
+        slivers = TestGemeindenBayernNoSliver._find_slivers(self.features)
+        self.assertEqual(
+            slivers, [],
+            f'Slivers after {self.PERCENTAGE}% generalisation '
+            f'of sliver2 ({len(slivers)} pair(s)):\n'
+            + '\n'.join(f'  {s}' for s in slivers[:10]),
+        )
+
+    def test_dissolve_small_preserves_all_features(self):
+        """dissolve_small=True must not eliminate entire features (create geographic holes)."""
+        from generalize.api import generalize_polygon_layer
+        layer = _load_layer(_SLIVER2)
+        features, _, _ = generalize_polygon_layer(
+            layer, percentage=self.PERCENTAGE, add_to_project=False,
+            dissolve_small=True,
+        )
+        input_count = layer.featureCount()
+        self.assertEqual(
+            len(features), input_count,
+            f'dissolve_small dropped entire features: '
+            f'got {len(features)}, expected {input_count}',
+        )
+
+
 class TestUntrasriedValidGeometry(unittest.TestCase):
     """
     Regression test for Untrasried (DEBKGVGB000006H6) from gemeinden_deutschland.
@@ -468,7 +610,6 @@ class TestUntrasriedValidGeometry(unittest.TestCase):
         layer = _load_layer(_UNTRASRIED)
         features, _, _ = generalize_polygon_layer(
             layer, percentage=cls.PERCENTAGE, add_to_project=False,
-            constrained=True,
         )
         cls.features = features
 
@@ -508,7 +649,6 @@ class TestGemeindenDeutschlandValidGeometry(unittest.TestCase):
         layer = _load_layer(_GEMEINDEN_DEUTSCHLAND)
         features, _, _ = generalize_polygon_layer(
             layer, percentage=cls.PERCENTAGE, add_to_project=False,
-            constrained=True,
         )
         cls.features = features
 
@@ -583,14 +723,14 @@ def _validity_test_body(test_case, invalid_layer, error_layer, percentage, datas
     )
 
 
-def _run_validity_check(layer, percentage, constrained):
+def _run_validity_check(layer, percentage):
     """Generalise *layer* and run QGIS checkvalidity; return (invalid, error) layers."""
     import processing
     from qgis.core import QgsVectorLayer
     from generalize.api import generalize_polygon_layer
 
     features, _, _ = generalize_polygon_layer(
-        layer, percentage=percentage, add_to_project=False, constrained=constrained,
+        layer, percentage=percentage, add_to_project=False,
     )
     temp = QgsVectorLayer(f'Polygon?crs={layer.crs().authid()}', '_temp', 'memory')
     temp.dataProvider().addAttributes(layer.fields())
@@ -618,7 +758,7 @@ class TestGreatBritainValidGeometry(unittest.TestCase):
     def setUpClass(cls):
         layer = _load_layer(_GREAT_BRITAIN)
         cls.invalid_layer, cls.error_layer = _run_validity_check(
-            layer, cls.PERCENTAGE, constrained=True,
+            layer, cls.PERCENTAGE,
         )
 
     def test_all_features_are_valid(self):
@@ -643,7 +783,7 @@ class TestFranceValidGeometry(unittest.TestCase):
     def setUpClass(cls):
         layer = _load_layer(_FRANCE)
         cls.invalid_layer, cls.error_layer = _run_validity_check(
-            layer, cls.PERCENTAGE, constrained=True,
+            layer, cls.PERCENTAGE,
         )
 
     def test_all_features_are_valid(self):
@@ -672,7 +812,7 @@ class TestDissolveSmallUnconstrained(unittest.TestCase):
         # Must not raise — before the fix this raised "unhashable type: 'TopoRing'"
         features, _, _ = generalize_polygon_layer(
             layer, percentage=self.PERCENTAGE, add_to_project=False,
-            constrained=False, dissolve_small=True,
+            dissolve_small=True,
         )
         self.assertIsNotNone(features)
 
@@ -698,13 +838,13 @@ class TestDissolveSmall(unittest.TestCase):
 
         features_plain, _, _ = generalize_polygon_layer(
             layer, percentage=cls.PERCENTAGE, add_to_project=False,
-            constrained=True, dissolve_small=False,
+            dissolve_small=False,
         )
         cls.features_plain = features_plain
 
         features_dissolved, _, _ = generalize_polygon_layer(
             layer, percentage=cls.PERCENTAGE, add_to_project=False,
-            constrained=True, dissolve_small=True,
+            dissolve_small=True,
         )
         cls.features_dissolved = features_dissolved
 

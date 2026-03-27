@@ -286,6 +286,91 @@ def build(layer: QgsVectorLayer, snap_tolerance: float = 0, progress_callback=No
     return topo
 
 
+def _find_best_neighbor(topo: TopoLayer, pid_small: int,
+                        exclude: set[int]) -> int | None:
+    """Return the pid of the polygon sharing the most edge length with pid_small's outer ring."""
+    small_eids = {eid for eid, _ in topo.polygons[pid_small].outer_ring.half_edges}
+    best_pid, best_length = None, 0.0
+    for pid, poly in topo.polygons.items():
+        if pid == pid_small or pid in exclude:
+            continue
+        length = 0.0
+        for eid, _ in poly.outer_ring.half_edges:
+            if eid in small_eids:
+                edge = topo.edges[eid]
+                if len(edge.coords) >= 2:
+                    d = np.diff(edge.coords, axis=0)
+                    length += float(np.hypot(d[:, 0], d[:, 1]).sum())
+        if length > best_length:
+            best_length, best_pid = length, pid
+    return best_pid
+
+
+def _merge_ring_into_neighbor(topo: TopoLayer, pid_small: int,
+                               pid_neighbor: int) -> bool:
+    """
+    Merge the outer ring of ``pid_small`` into the outer ring of ``pid_neighbor``
+    by removing their shared edges and inserting the small polygon's non-shared
+    edges at the correct position in the neighbor's ring.
+
+    After a successful merge the neighbor's outer ring encloses the union of
+    both polygons' areas, so no geographic gap is introduced when ``pid_small``
+    is subsequently deleted from the topology.
+
+    Returns True on success, False when no shared edges exist.
+    """
+    small    = topo.polygons[pid_small]
+    neighbor = topo.polygons[pid_neighbor]
+
+    small_eids    = {eid for eid, _ in small.outer_ring.half_edges}
+    neighbor_eids = {eid for eid, _ in neighbor.outer_ring.half_edges}
+    shared_eids   = small_eids & neighbor_eids
+
+    if not shared_eids:
+        return False
+
+    # Find A's non-shared edges starting from the one right after the last
+    # shared edge in A's ring.  This sub-sequence forms the path that replaces
+    # the shared segment in B's ring.
+    #
+    # Why: B traverses the shared segment in reverse (opposite direction to A).
+    # If B enters the shared segment at node n_entry and exits at n_exit, then
+    # A's non-shared path from n_entry to n_exit (in A's forward direction)
+    # starts immediately after the last shared edge in A's ring.
+    a_he = small.outer_ring.half_edges
+    n = len(a_he)
+    last_shared_in_a = max(
+        (i for i, (eid, _) in enumerate(a_he) if eid in shared_eids), default=None
+    )
+    if last_shared_in_a is None:
+        return False
+
+    a_non_shared = [
+        a_he[(last_shared_in_a + 1 + i) % n]
+        for i in range(n)
+        if a_he[(last_shared_in_a + 1 + i) % n][0] not in shared_eids
+    ]
+
+    # Build the new neighbor ring: walk B's half-edges, skip shared edges,
+    # and insert A's non-shared sub-sequence at the first shared edge encountered.
+    new_he: list[tuple[int, bool]] = []
+    inserted = False
+    for eid, fwd in neighbor.outer_ring.half_edges:
+        if eid in shared_eids:
+            if not inserted:
+                new_he.extend(a_non_shared)
+                inserted = True
+            # skip the shared edge itself
+        else:
+            new_he.append((eid, fwd))
+
+    if not inserted or not new_he:
+        return False
+
+    neighbor.outer_ring.half_edges = new_he
+    return True
+
+
 def dissolve_small_rings(topo: TopoLayer) -> tuple[int, int]:
     """
     Remove topology rings whose area is below the auto-scaled threshold
@@ -384,6 +469,13 @@ def dissolve_small_rings(topo: TopoLayer) -> tuple[int, int]:
                      if p not in pids_to_remove]
         if len(remaining) <= 1:
             continue  # never drop the last part of a feature
+
+        # Merge into the topologically adjacent neighbor (most shared edge
+        # length) before removing, so no geographic gap is created.
+        best_nb = _find_best_neighbor(topo, pid, pids_to_remove)
+        if best_nb is not None:
+            _merge_ring_into_neighbor(topo, pid, best_nb)
+
         pids_to_remove.add(pid)
         # Also remove the corresponding hole from the parent (if any)
         outer_key = frozenset(eid for eid, _ in poly.outer_ring.half_edges)
