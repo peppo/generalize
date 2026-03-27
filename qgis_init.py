@@ -10,16 +10,59 @@ before importing anything from qgis.*:
     from qgis.core import ...  # safe to use from here on
 
 The module is idempotent: subsequent imports are no-ops.
+
+QGIS version selection
+----------------------
+By default the first installation found in ``_CANDIDATES`` is used.
+Override by setting the ``QGIS_ROOT`` environment variable before importing:
+
+    set QGIS_ROOT=C:\\Program Files\\QGIS 4.0.0
 """
+import glob
 import os
 import sys
 
 # ---------------------------------------------------------------------------
-# Paths  (edit QGIS_ROOT if your installation differs)
+# Paths — auto-detected; override with QGIS_ROOT env var
 # ---------------------------------------------------------------------------
-QGIS_ROOT = r'C:\Program Files\QGIS 3.40.15'
-_APP      = os.path.join(QGIS_ROOT, 'apps', 'qgis-ltr')
-_PYTHON   = os.path.join(QGIS_ROOT, 'apps', 'Python312')
+
+_CANDIDATES = [
+    r'C:\Program Files\QGIS 3.40.15',
+    r'C:\Program Files\QGIS 4.0.0',
+]
+
+
+def _detect_qgis_root() -> str:
+    env = os.environ.get('QGIS_ROOT')
+    if env and os.path.isdir(env):
+        return env
+    for c in _CANDIDATES:
+        if os.path.isdir(c):
+            return c
+    raise RuntimeError(
+        "QGIS installation not found. Set the QGIS_ROOT environment variable "
+        "to the root of your QGIS installation (e.g. "
+        r"C:\Program Files\QGIS 3.40.15)."
+    )
+
+
+QGIS_ROOT = _detect_qgis_root()
+
+# QGIS 3.x ships qgis-ltr; QGIS 4.x ships qgis
+_APP = (
+    os.path.join(QGIS_ROOT, 'apps', 'qgis-ltr')
+    if os.path.isdir(os.path.join(QGIS_ROOT, 'apps', 'qgis-ltr'))
+    else os.path.join(QGIS_ROOT, 'apps', 'qgis')
+)
+
+# Detect bundled Python directory (Python312, Python313, …)
+_python_dirs = sorted(glob.glob(os.path.join(QGIS_ROOT, 'apps', 'Python3*')))
+_PYTHON = _python_dirs[-1] if _python_dirs else os.path.join(QGIS_ROOT, 'apps', 'Python312')
+
+# Qt5 (QGIS 3.x) or Qt6 (QGIS 4.x)
+_qt_bin = os.path.join(QGIS_ROOT, 'apps', 'qt5', 'bin')
+if not os.path.isdir(_qt_bin):
+    _qt_bin = os.path.join(QGIS_ROOT, 'apps', 'qt6', 'bin')
 
 # ---------------------------------------------------------------------------
 # Internal state
@@ -44,7 +87,7 @@ def _bootstrap():
         for d in [
             os.path.join(QGIS_ROOT, 'bin'),
             os.path.join(_APP, 'bin'),
-            os.path.join(QGIS_ROOT, 'apps', 'qt5', 'bin'),
+            _qt_bin,
             os.path.join(QGIS_ROOT, 'apps', 'gdal', 'bin'),
         ]:
             if os.path.isdir(d):

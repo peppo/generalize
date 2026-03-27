@@ -20,4 +20,4 @@ class GeneralizePlugin:
 
     def run(self):
         dialog = GeneralizeDialog(self.iface)
-        dialog.exec_()
+        dialog.exec()

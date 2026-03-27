@@ -39,7 +39,7 @@ import struct
 from collections import defaultdict
 
 import numpy as np
-from PyQt5.QtCore import QByteArray
+from qgis.PyQt.QtCore import QByteArray
 from qgis.core import QgsFeature, QgsGeometry, QgsVectorLayer
 
 from .topology import TopoEdge, TopoLayer, TopoNode, TopoPolygon, TopoRing
