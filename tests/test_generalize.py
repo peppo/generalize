@@ -893,5 +893,26 @@ class TestDissolveSmall(unittest.TestCase):
         )
 
 
+class TestDialogSmoke(unittest.TestCase):
+    """
+    Smoke test: GeneralizeDialog can be constructed on the current Qt version.
+
+    Catches Qt enum AttributeErrors (e.g. Qt.Horizontal removed in PyQt6)
+    without requiring a real QGIS GUI session.  Runs with QT_QPA_PLATFORM=offscreen
+    via qgis_init, so no display is needed.
+    """
+
+    def test_dialog_instantiates(self):
+        from unittest.mock import MagicMock
+        from generalize.generalize_dialog import GeneralizeDialog
+        iface = MagicMock()
+        dlg = GeneralizeDialog(iface)
+        self.assertEqual(dlg.slider.minimum(), 0)
+        self.assertEqual(dlg.slider.maximum(), 100)
+        self.assertEqual(dlg.slider.value(), 50)
+        self.assertTrue(dlg.repair_checkbox.isChecked())
+        self.assertFalse(dlg.dissolve_small_checkbox.isChecked())
+
+
 if __name__ == '__main__':
     unittest.main(verbosity=2)
