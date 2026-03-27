@@ -1,9 +1,10 @@
 [general]
 name=Generalize Polygons
 description=Topology-preserving polygon simplification using the weighted Visvalingam algorithm — no slivers, no gaps.
-version=0.5.2
+version=0.5.3-SNAPSHOT
 qgisMinimumVersion=3.40
-qgisMaximumVersion=3.99
+qgisMaximumVersion=4.99
+supportsQt6=True
 author=Peppo Herney
 email=peppo.herney@gmx.de
 homepage=https://github.com/peppo/generalize
