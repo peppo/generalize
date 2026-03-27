@@ -4,6 +4,19 @@ from qgis.PyQt.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QComb
 from qgis.PyQt.QtCore import Qt
 from qgis.core import QgsProject, QgsVectorLayer, QgsWkbTypes, QgsTask, QgsApplication, QgsMessageLog, Qgis
 
+# PyQt6 moved orientation/geometry enums into sub-namespaces; PyQt5 kept them
+# on the top-level class.  Resolve once at import time so the rest of the file
+# is version-agnostic.
+try:
+    _Qt_Horizontal = Qt.Orientation.Horizontal          # PyQt6
+except AttributeError:
+    _Qt_Horizontal = Qt.Horizontal                      # PyQt5
+
+try:
+    _PolygonGeometry = QgsWkbTypes.GeometryType.PolygonGeometry   # QGIS 4
+except AttributeError:
+    _PolygonGeometry = QgsWkbTypes.PolygonGeometry                # QGIS 3
+
 from .api import generalize_polygon_layer, _make_layer
 
 # Keep strong Python references to running tasks so the GC does not collect
@@ -130,7 +143,7 @@ class GeneralizeDialog(QDialog):
 
         # Percentage slider
         self.slider_label = QLabel('Reduction Percentage: 50%')
-        self.slider = QSlider(Qt.Horizontal)
+        self.slider = QSlider(_Qt_Horizontal)
         self.slider.setMinimum(0)
         self.slider.setMaximum(100)
         self.slider.setValue(50)
@@ -165,7 +178,7 @@ class GeneralizeDialog(QDialog):
     def populate_layers(self):
         layers = QgsProject.instance().mapLayers().values()
         for layer in layers:
-            if isinstance(layer, QgsVectorLayer) and layer.geometryType() == QgsWkbTypes.PolygonGeometry:
+            if isinstance(layer, QgsVectorLayer) and layer.geometryType() == _PolygonGeometry:
                 self.layer_combo.addItem(layer.name(), layer)
 
     def update_label(self, value):
