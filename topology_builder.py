@@ -372,15 +372,19 @@ def _merge_ring_into_neighbor(topo: TopoLayer, pid_small: int,
     return True
 
 
-def dissolve_small_rings(topo: TopoLayer) -> tuple[int, int]:
+def dissolve_small_rings(topo: TopoLayer, threshold: float | None = None) -> tuple[int, int]:
     """
-    Remove topology rings whose area is below the auto-scaled threshold
-    ``2 * d²``, where ``d`` is the global average edge-segment length across
-    all simplified edges.
+    Remove topology rings whose area is below *threshold*.
 
-    The threshold is self-scaling: after aggressive generalisation the average
-    segment is longer, so the threshold is larger — tiny artefacts are dropped
-    proportionally to the generalisation level.
+    When *threshold* is ``None`` (default) it is derived automatically from
+    the current edge geometry as ``2 · d²``, where ``d`` is the global
+    average edge-segment length.  This is self-scaling: after aggressive
+    generalisation the average segment is longer, so the threshold is larger —
+    tiny artefacts are dropped proportionally to the generalisation level.
+
+    Pass an explicit *threshold* to use a predetermined area cutoff, e.g. an
+    estimate based on the *expected* post-simplification segment length when
+    calling before simplification.
 
     Two types of rings are dropped, always atomically so no gap or overlap is
     created in the output:
@@ -396,20 +400,21 @@ def dissolve_small_rings(topo: TopoLayer) -> tuple[int, int]:
 
     Returns ``(n_parts_dropped, n_holes_dropped)``.
     """
-    # --- Compute global average segment length from simplified edges ----------
-    total_length = 0.0
-    total_segments = 0
-    for edge in topo.edges.values():
-        if len(edge.coords) >= 2:
-            diffs = np.diff(edge.coords, axis=0)
-            total_length += float(np.hypot(diffs[:, 0], diffs[:, 1]).sum())
-            total_segments += len(edge.coords) - 1
+    # --- Compute threshold from edge geometry if not supplied -----------------
+    if threshold is None:
+        total_length = 0.0
+        total_segments = 0
+        for edge in topo.edges.values():
+            if len(edge.coords) >= 2:
+                diffs = np.diff(edge.coords, axis=0)
+                total_length += float(np.hypot(diffs[:, 0], diffs[:, 1]).sum())
+                total_segments += len(edge.coords) - 1
 
-    if total_segments == 0:
-        return 0, 0
+        if total_segments == 0:
+            return 0, 0
 
-    d = total_length / total_segments
-    threshold = 2.0 * d * d
+        d = total_length / total_segments
+        threshold = 2.0 * d * d
 
     # --- Helper: shoelace area of a closed ring (numpy) ----------------------
     def _area(ring: TopoRing) -> float:

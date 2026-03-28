@@ -1,5 +1,6 @@
 import time
 
+import numpy as np
 import processing
 from qgis.core import QgsVectorLayer, QgsWkbTypes, QgsProject, QgsMessageLog, Qgis
 
@@ -130,6 +131,26 @@ def generalize_polygon_layer(
         # Snapshot original coords before simplification so repair_ring_inversions
         # can restore removed points if needed.
         original_edge_coords = {edge.id: edge.coords.copy() for edge in edges}
+
+        # --- 2b. Pre-simplification dissolve (prevent cross-ring intersections) ---
+        # Tiny islands/holes that survive into simplification can cause the
+        # outer ring to cross a hole boundary.  Removing them first prevents
+        # that.  We estimate the post-simplification threshold so features that
+        # would be dropped after simplification are already gone before it.
+        if dissolve_small:
+            total_length = sum(
+                float(np.hypot(np.diff(e.coords[:, 0]), np.diff(e.coords[:, 1])).sum())
+                for e in edges if len(e.coords) >= 2
+            )
+            total_segments_pre = sum(len(e.coords) - 1 for e in edges if len(e.coords) >= 2)
+            if total_segments_pre > 0:
+                d_pre = total_length / total_segments_pre
+                scale = 1.0 / max(1.0 - percentage / 100.0, 0.01) ** 2
+                pre_threshold = 2.0 * d_pre * d_pre * scale
+                n_parts, n_holes = dissolve_small_rings(topo, threshold=pre_threshold)
+                if n_parts or n_holes:
+                    _log(f"Pre-simplification dissolve: removed {n_parts} part(s) "
+                         f"and {n_holes} hole(s)")
 
         # --- 3. Simplify every edge exactly once ---
         _log(f"Simplifying {total_edges} edges …")
