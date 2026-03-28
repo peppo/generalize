@@ -392,7 +392,8 @@ class TestSelfIntersectionValidGeometry(unittest.TestCase):
         from generalize.api import generalize_polygon_layer
         layer = _load_layer(_SELF_INTERSECTION)
         features, _, _ = generalize_polygon_layer(
-            layer, percentage=cls.PERCENTAGE, add_to_project=False            
+            layer, percentage=cls.PERCENTAGE, add_to_project=False,
+            repair_inversions=True,
         )
         cls.features = features
 
