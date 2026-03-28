@@ -195,11 +195,11 @@ def generalize_polygon_layer(
         t5 = time.perf_counter()
         _log("Reconstructing features …")
         features = []
-        skipped = 0
+        collapsed = []
         for feat in to_qgs_features(topo):
             geom = feat.geometry()
             if geom.isNull() or geom.isEmpty() or geom.area() <= 0:
-                skipped += 1
+                collapsed.append(feat)
                 continue
             features.append(feat)
         _log(f"Reconstruction done in {time.perf_counter() - t5:.1f}s")
@@ -209,8 +209,24 @@ def generalize_polygon_layer(
         return None, original_count, 0
 
     new_count = len(features)
-    if skipped:
-        _log(f"Warning: {skipped} feature(s) collapsed to empty geometry and were skipped.")
+    if collapsed:
+        skipped = len(collapsed)
+        fields = input_layer.fields()
+        name_field = next(
+            (f for f in ('name', 'Name', 'NAME', 'oid', 'OID', 'id', 'ID')
+             if fields.indexOf(f) >= 0),
+            None,
+        )
+        ids = []
+        for feat in collapsed[:10]:
+            if name_field:
+                idx = fields.indexOf(name_field)
+                ids.append(str(feat.attributes()[idx]))
+            else:
+                ids.append(f"fid={feat.id()}")
+        more = f" (showing first 10)" if skipped > 10 else ""
+        _log(f"Warning: {skipped} feature(s) collapsed to empty geometry and were skipped{more}: "
+             + ", ".join(ids))
 
     # --- 7. Post-simplification validity check (log only) ---
     invalid_after = sum(1 for f in features if not f.geometry().isGeosValid())
