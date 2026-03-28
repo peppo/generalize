@@ -153,10 +153,9 @@ def generalize_polygon_layer(
         # --- 4. Repair self-intersecting rings (optional) ---
         if repair_inversions:
             t_ir = time.perf_counter()
-            n_restored = repair_ring_inversions(topo, original_edge_coords)
-            if n_restored:
-                _log(f"Inversion repair: {n_restored} point(s) restored "
-                     f"in {time.perf_counter() - t_ir:.1f}s")
+            n_repairs, n_invalid = repair_ring_inversions(topo, original_edge_coords)
+            _log(f"Inversion repair: {n_invalid} ring(s) needed repair, "
+                 f"{n_repairs} action(s) taken in {time.perf_counter() - t_ir:.1f}s")
 
         # --- 5. Drop small rings / parts (dissolve_small mode) ---
         if dissolve_small:

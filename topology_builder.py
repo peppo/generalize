@@ -502,6 +502,13 @@ def dissolve_small_rings(topo: TopoLayer) -> tuple[int, int]:
 # Post-simplification: repair self-intersecting (inverted) rings
 # ---------------------------------------------------------------------------
 
+def _signed_area(coords: np.ndarray) -> float:
+    """Signed shoelace area of a closed ring (coords[-1] == coords[0])."""
+    x, y = coords[:-1, 0], coords[:-1, 1]
+    xn, yn = coords[1:, 0], coords[1:, 1]
+    return float(np.sum(x * yn - xn * y)) / 2.0
+
+
 def _seg_intersect_params(p1, p2, p3, p4):
     """
     Return (t, u) for the intersection of segment (p1, p2) and (p3, p4),
@@ -544,6 +551,33 @@ def _find_crossings(coords):
     return crossings
 
 
+def _loop_areas(
+    coords: np.ndarray,
+    crossing: tuple[int, int],
+) -> tuple[float, float]:
+    """
+    Approximate areas of the two loops formed by crossing pair (i, j).
+
+    Loop A: the path c[i] → c[i+1] → … → c[j+1], closed back to c[i].
+    Loop B: the complementary path c[j+1] → … → c[n-1] → c[0] → … → c[i],
+            closed back to c[j+1].
+
+    Returns (|area_A|, |area_B|).
+    """
+    i, j = crossing
+    n = len(coords) - 1  # number of unique ring vertices
+
+    loop_a_pts = coords[i:j + 2]
+    loop_a = np.vstack([loop_a_pts, loop_a_pts[:1]])
+    area_a = abs(_signed_area(loop_a))
+
+    loop_b_pts = np.vstack([coords[j + 1:n], coords[:i + 1]])
+    loop_b = np.vstack([loop_b_pts, loop_b_pts[:1]])
+    area_b = abs(_signed_area(loop_b))
+
+    return area_a, area_b
+
+
 def _build_seg_to_he(ring, edges):
     """
     Return a list where entry i is the index into ring.half_edges of the
@@ -554,6 +588,32 @@ def _build_seg_to_he(ring, edges):
         n_segs = max(0, len(edges[edge_id].coords) - 1)
         seg_to_he.extend([he_idx] * n_segs)
     return seg_to_he
+
+
+def _build_ring_to_edge_pos(  # exported for diagnostics
+    ring: TopoRing,
+    edges: dict,
+) -> list[tuple[int, int]]:
+    """
+    Return a list where entry k is ``(he_idx, edge_forward_idx)`` for ring
+    position k (0-indexed, not including the closing duplicate).
+
+    ``edge_forward_idx`` is the index into ``edge.coords`` in the **forward**
+    direction of the edge.  For a reversed half-edge (``forward=False``), the
+    lk-th traversal position maps to ``edge.coords[m-1-lk]``.
+
+    A half-edge is a directed reference ``(edge_id, forward)`` to a shared
+    arc.  The ring contributes ``m-1`` positions per half-edge (``seg[:-1]``),
+    where the excluded last point is the junction node shared with the next
+    half-edge.
+    """
+    mapping: list[tuple[int, int]] = []
+    for he_idx, (edge_id, forward) in enumerate(ring.half_edges):
+        m = len(edges[edge_id].coords)
+        for lk in range(m - 1):
+            efwd_idx = lk if forward else (m - 1 - lk)
+            mapping.append((he_idx, efwd_idx))
+    return mapping
 
 
 def _find_intersected_segment(ring, crossings, seg_to_he, edges):
@@ -680,6 +740,76 @@ def _insert_point(edge, point, original_coords):
     edge.coords = np.insert(edge.coords, insert_pos, point, axis=0)
 
 
+def _drop_small_loop(
+    ring: TopoRing,
+    edges: dict,
+    crossing: tuple[int, int],
+    ring_coords: np.ndarray,
+) -> None:
+    """
+    Remove the interior points of the smaller loop formed by *crossing*.
+
+    **Same-edge case**: all small-loop ring positions belong to one half-edge —
+    those edge-internal coords are deleted directly from ``edge.coords``.
+
+    **Cross-edge case**: the small loop spans multiple half-edges — interior
+    points are removed from the boundary edges, and entirely-consumed
+    intermediate half-edges are removed from ``ring.half_edges``.
+
+    Junction nodes (``edge.coords[0]`` and ``edge.coords[-1]``) are never
+    removed.  If a neighbour polygon shares a modified edge it automatically
+    receives the updated coords, absorbing the dropped area.
+    """
+    i, j = crossing
+    n = len(ring_coords) - 1  # number of unique ring vertices
+
+    area_a, area_b = _loop_areas(ring_coords, crossing)
+    if area_a <= area_b:
+        # Loop A (positions i+1 … j) is the small one
+        small_positions = list(range(i + 1, j + 1))
+    else:
+        # Loop B (positions j+1 … n-1, 0 … i-1) is the small one
+        small_positions = list(range(j + 1, n)) + list(range(0, i))
+
+    if not small_positions:
+        return
+
+    ring_to_edge = _build_ring_to_edge_pos(ring, edges)
+    small_set = set(small_positions)
+
+    # he_idx → set of edge_forward_indices to remove
+    he_removals: dict[int, set] = {}
+    for pos in small_positions:
+        he_idx, efwd_idx = ring_to_edge[pos]
+        he_removals.setdefault(he_idx, set()).add(efwd_idx)
+
+    # Delete non-junction interior points from each affected edge
+    for he_idx, efwd_indices in he_removals.items():
+        edge_id, _fwd = ring.half_edges[he_idx]
+        edge = edges[edge_id]
+        m = len(edge.coords)
+        to_delete = sorted(idx for idx in efwd_indices if 0 < idx < m - 1)
+        if to_delete:
+            edge.coords = np.delete(edge.coords, to_delete, axis=0)
+
+    # Cross-edge case: remove half-edges whose every ring position is in the
+    # small loop (they are entirely consumed).
+    he_ring_positions: dict[int, set] = {}
+    for k, (he_idx, _) in enumerate(ring_to_edge):
+        he_ring_positions.setdefault(he_idx, set()).add(k)
+
+    he_to_remove = {
+        he_idx
+        for he_idx, positions in he_ring_positions.items()
+        if positions.issubset(small_set)
+    }
+    if he_to_remove:
+        ring.half_edges = [
+            he for idx, he in enumerate(ring.half_edges)
+            if idx not in he_to_remove
+        ]
+
+
 def repair_ring_inversions(
     topo: TopoLayer,
     original_edge_coords: dict[int, np.ndarray],
@@ -687,36 +817,66 @@ def repair_ring_inversions(
 ) -> int:
     """
     Detect self-intersecting outer rings caused by over-simplification and
-    restore original edge points to resolve the inversions.
+    repair them using one of two strategies:
 
-    Works at the topology level: restoring a point to a shared edge
-    automatically updates ALL polygons that reference it.  After each pass
-    the entire set of outer rings is re-evaluated, so neighbours of a
-    modified shared edge are checked too.
+    **Case 1 — Concave inversion**: multiple crossing pairs, or one crossing
+    where both loops are large (area ratio ≥ 5 %).  Fix: restore the original
+    point furthest from the most-crossed segment.
 
-    Returns the total number of point restorations made.
+    **Case 2 — Figure-8**: exactly one crossing pair and the smaller loop is
+    < 5 % of the total ring area.  Fix: drop the small loop by removing its
+    interior points from the relevant edge(s).
+
+    A **half-edge** is a directed reference ``(edge_id, forward)`` to a shared
+    arc.  Modifying ``edge.coords`` automatically updates ALL polygons that
+    share the same edge.  After each pass every outer ring is re-evaluated so
+    that fixes to shared edges are propagated to neighbours.
+
+    Returns ``(total_repairs, initial_invalid_count)`` where
+    *total_repairs* is the number of actions taken (point restorations +
+    loop drops) and *initial_invalid_count* is the number of outer rings
+    that were self-intersecting before any repair.
     """
-    total_restorations = 0
+    _FIGURE8_RATIO = 0.05
+    total_repairs = 0
+    initial_invalid_count = 0
 
-    for _ in range(max_attempts):
-        # Identify all still-invalid outer rings
+    for attempt in range(max_attempts):
         invalid_rings = []
         for pid, poly in topo.polygons.items():
             coords = poly.outer_ring.iter_coords_numpy(topo.edges)
             if len(coords) >= 4 and _find_crossings(coords):
                 invalid_rings.append((pid, poly.outer_ring))
 
+        if attempt == 0:
+            initial_invalid_count = len(invalid_rings)
+
         if not invalid_rings:
             break
 
         for pid, ring in invalid_rings:
-            # Re-compute coords: a previous fix in this pass may have updated
-            # a shared edge, already resolving this ring.
+            # Re-fetch coords: a shared-edge fix earlier in this pass may
+            # have already resolved this ring.
             coords = ring.iter_coords_numpy(topo.edges)
             crossings = _find_crossings(coords)
             if not crossings:
                 continue
 
+            # --- Case 2: figure-8 — find the first crossing with a tiny loop ---
+            case2_done = False
+            for crossing in crossings:
+                area_a, area_b = _loop_areas(coords, crossing)
+                total_area = area_a + area_b
+                if total_area > 0 and min(area_a, area_b) / total_area < _FIGURE8_RATIO:
+                    _drop_small_loop(ring, topo.edges, crossing, coords)
+                    total_repairs += 1
+                    case2_done = True
+                    break  # re-evaluate the ring in the next pass
+
+            if case2_done:
+                continue
+
+            # --- Case 1: concave inversion (all crossings have large loops) ---
             seg_to_he = _build_seg_to_he(ring, topo.edges)
             result = _find_intersected_segment(ring, crossings, seg_to_he, topo.edges)
             if result is None:
@@ -731,9 +891,9 @@ def repair_ring_inversions(
                 continue
 
             _insert_point(edge, point, original_edge_coords[edge_id])
-            total_restorations += 1
+            total_repairs += 1
 
-    return total_restorations
+    return total_repairs, initial_invalid_count
 
 
 def to_qgs_features(topo: TopoLayer) -> list[QgsFeature]:
