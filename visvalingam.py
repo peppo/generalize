@@ -368,7 +368,7 @@ def simplify_polygon(coords, percentage, cascade=False, constrained=False,
     n = len(coords)
     if n < 4:
         return coords
-    keep_count = max(4, int(n * (1 - percentage / 100)))
+    keep_count = max(5, int(n * (1 - percentage / 100)))
     if constrained:
         return _visvalingam_cascade_constrained(coords, keep_count,
                                                 other_rings=other_rings)

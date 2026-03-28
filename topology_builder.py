@@ -992,19 +992,19 @@ def to_qgs_features(topo: TopoLayer) -> list[QgsFeature]:
         is_multi = any(p.is_multipart for p in parts)
 
         # Build per-part lists of numpy ring arrays (outer + holes, closed).
-        # Rings with fewer than 4 points (< 3 distinct vertices) are degenerate:
+        # Rings with fewer than 5 points (< 4 distinct vertices) are degenerate:
         # they occur when every arc of the ring was simplified to its two junction
         # nodes only.  Drop degenerate holes silently; skip the whole part when
         # the outer ring itself is degenerate.
         parts_rings: list[list[np.ndarray]] = []
         for part in parts:
             outer = part.outer_ring.iter_coords_numpy(topo.edges)
-            if len(outer) < 4:
+            if len(outer) < 5:
                 continue
             holes = [
                 arr for arr in
                 (h.iter_coords_numpy(topo.edges) for h in part.inner_rings)
-                if len(arr) >= 4
+                if len(arr) >= 5
             ]
             parts_rings.append([outer] + holes)
 
