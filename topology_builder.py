@@ -6,6 +6,7 @@ Public API
 snap_to_self(layer, tolerance)   -> QgsVectorLayer   (topological pre-processing)
 build(layer)                     -> TopoLayer
 dissolve_small_rings(topo)       -> (n_parts, n_holes)
+repair_ring_inversions(topo, original_edge_coords) -> int
 to_qgs_features(topo)            -> list[QgsFeature]
 
 Algorithm overview
@@ -495,6 +496,244 @@ def dissolve_small_rings(topo: TopoLayer) -> tuple[int, int]:
         del topo.polygons[pid]
 
     return len(pids_to_remove), n_holes
+
+
+# ---------------------------------------------------------------------------
+# Post-simplification: repair self-intersecting (inverted) rings
+# ---------------------------------------------------------------------------
+
+def _seg_intersect_params(p1, p2, p3, p4):
+    """
+    Return (t, u) for the intersection of segment (p1, p2) and (p3, p4),
+    or None if they are parallel/collinear.
+    Proper intersection requires 0 < t < 1 and 0 < u < 1.
+    """
+    d1 = p2 - p1
+    d2 = p4 - p3
+    cross = float(d1[0] * d2[1] - d1[1] * d2[0])
+    if abs(cross) < 1e-12:
+        return None
+    d3 = p3 - p1
+    t = float(d3[0] * d2[1] - d3[1] * d2[0]) / cross
+    u = float(d3[0] * d1[1] - d3[1] * d1[0]) / cross
+    return t, u
+
+
+def _find_crossings(coords):
+    """
+    Find pairs of non-adjacent segments in a closed ring that properly
+    intersect (t and u strictly between 0 and 1).
+
+    coords: (n+1, 2) numpy array, closed (coords[0] == coords[-1]).
+    Returns a list of (i, j) segment-index pairs.
+    """
+    n = len(coords) - 1  # number of segments
+    eps = 1e-9
+    crossings = []
+    for i in range(n):
+        p1, p2 = coords[i], coords[i + 1]
+        for j in range(i + 2, n):
+            if i == 0 and j == n - 1:
+                continue  # first and last segments share coords[0]
+            p3, p4 = coords[j], coords[j + 1]
+            params = _seg_intersect_params(p1, p2, p3, p4)
+            if params is not None:
+                t, u = params
+                if eps < t < 1 - eps and eps < u < 1 - eps:
+                    crossings.append((i, j))
+    return crossings
+
+
+def _build_seg_to_he(ring, edges):
+    """
+    Return a list where entry i is the index into ring.half_edges of the
+    half-edge that produced segment i in the reconstructed ring.
+    """
+    seg_to_he = []
+    for he_idx, (edge_id, _) in enumerate(ring.half_edges):
+        n_segs = max(0, len(edges[edge_id].coords) - 1)
+        seg_to_he.extend([he_idx] * n_segs)
+    return seg_to_he
+
+
+def _find_intersected_segment(ring, crossings, seg_to_he, edges):
+    """
+    Find the ring segment that is crossed most often ("the intersected"),
+    and return (he_idx, edge_id, lo_idx, hi_idx) where lo_idx < hi_idx
+    are indices into edge.coords forming the two endpoints of that segment
+    in the forward direction of the edge.
+    Returns None if the segment cannot be determined.
+    """
+    seg_freq: dict[int, int] = {}
+    for i, j in crossings:
+        seg_freq[i] = seg_freq.get(i, 0) + 1
+        seg_freq[j] = seg_freq.get(j, 0) + 1
+    if not seg_freq:
+        return None
+
+    intersected_ring_seg = max(seg_freq, key=seg_freq.get)
+    if intersected_ring_seg >= len(seg_to_he):
+        return None
+
+    he_idx = seg_to_he[intersected_ring_seg]
+    edge_id, forward = ring.half_edges[he_idx]
+    edge = edges[edge_id]
+    n = len(edge.coords)
+
+    # First ring segment index produced by this half-edge
+    he_ring_start = next(i for i, he in enumerate(seg_to_he) if he == he_idx)
+    local_seg = intersected_ring_seg - he_ring_start
+
+    if forward:
+        lo_idx, hi_idx = local_seg, local_seg + 1
+    else:
+        # Reversed traversal: local segment k → coords[n-1-k] → coords[n-2-k]
+        # In forward edge order that is [n-2-k, n-1-k].
+        lo_idx = n - 2 - local_seg
+        hi_idx = n - 1 - local_seg
+
+    if lo_idx < 0 or hi_idx >= n:
+        return None
+
+    return he_idx, edge_id, lo_idx, hi_idx
+
+
+def _best_restore_for_segment(edge, original_coords, lo_idx, hi_idx):
+    """
+    Find the best original interior point to insert between
+    edge.coords[lo_idx] and edge.coords[hi_idx].
+
+    'Best' = largest absolute perpendicular distance from the chord formed
+    by those two current edge points.  Returns None when no candidates remain
+    between those positions in the original arc.
+    """
+    # Arc-length parameterisation of original_coords
+    diffs = np.diff(original_coords, axis=0)
+    seg_lens = np.hypot(diffs[:, 0], diffs[:, 1])
+    arc_s = np.concatenate([[0.0], np.cumsum(seg_lens)])
+    total = float(arc_s[-1])
+    if total < 1e-12:
+        return None
+
+    def _t(p):
+        d = np.hypot(original_coords[:, 0] - float(p[0]),
+                     original_coords[:, 1] - float(p[1]))
+        return float(arc_s[int(np.argmin(d))]) / total
+
+    t_lo = _t(edge.coords[lo_idx])
+    t_hi = _t(edge.coords[hi_idx])
+    if t_lo > t_hi:
+        t_lo, t_hi = t_hi, t_lo
+
+    current = {(round(float(p[0]), 9), round(float(p[1]), 9)) for p in edge.coords}
+
+    # Original points with arc-length t strictly between t_lo and t_hi,
+    # not yet present in edge.coords.
+    remaining = []
+    for i, p in enumerate(original_coords):
+        if i == 0 or i == len(original_coords) - 1:
+            continue  # skip loop/arc endpoints
+        t = float(arc_s[i]) / total
+        if t_lo < t < t_hi:
+            key = (round(float(p[0]), 9), round(float(p[1]), 9))
+            if key not in current:
+                remaining.append(p)
+
+    if not remaining:
+        return None
+
+    candidates = np.array(remaining, dtype=np.float64)
+    s = edge.coords[lo_idx].astype(np.float64)
+    e_pt = edge.coords[hi_idx].astype(np.float64)
+    chord = e_pt - s
+    chord_len = float(np.linalg.norm(chord))
+    if chord_len < 1e-12:
+        return candidates[0]
+
+    perp = np.array([-chord[1], chord[0]]) / chord_len
+    dists = np.abs((candidates - s) @ perp)
+    return candidates[int(np.argmax(dists))]
+
+
+def _insert_point(edge, point, original_coords):
+    """
+    Insert *point* into edge.coords at the position that preserves the
+    original arc order, determined by arc-length along original_coords.
+    """
+    diffs = np.diff(original_coords, axis=0)
+    seg_lens = np.hypot(diffs[:, 0], diffs[:, 1])
+    arc_s = np.concatenate([[0.0], np.cumsum(seg_lens)])
+    total = float(arc_s[-1])
+
+    def _t(p):
+        d = np.hypot(original_coords[:, 0] - float(p[0]),
+                     original_coords[:, 1] - float(p[1]))
+        return float(arc_s[int(np.argmin(d))]) / total if total > 1e-12 else 0.0
+
+    t_new = _t(point)
+    # Exclude edge.coords[-1]: for loop edges it duplicates coords[0] and gets
+    # t=0, which would inflate insert_pos and place the point one position too late.
+    # For open arcs the endpoint has t=1 > any interior t_new, so excluding it
+    # never changes the count.
+    t_curr = [_t(cp) for cp in edge.coords[:-1]]
+    insert_pos = min(sum(1 for t in t_curr if t < t_new), len(edge.coords) - 1)
+    edge.coords = np.insert(edge.coords, insert_pos, point, axis=0)
+
+
+def repair_ring_inversions(
+    topo: TopoLayer,
+    original_edge_coords: dict[int, np.ndarray],
+    max_attempts: int = 5,
+) -> int:
+    """
+    Detect self-intersecting outer rings caused by over-simplification and
+    restore original edge points to resolve the inversions.
+
+    Works at the topology level: restoring a point to a shared edge
+    automatically updates ALL polygons that reference it.  After each pass
+    the entire set of outer rings is re-evaluated, so neighbours of a
+    modified shared edge are checked too.
+
+    Returns the total number of point restorations made.
+    """
+    total_restorations = 0
+
+    for _ in range(max_attempts):
+        # Identify all still-invalid outer rings
+        invalid_rings = []
+        for pid, poly in topo.polygons.items():
+            coords = poly.outer_ring.iter_coords_numpy(topo.edges)
+            if len(coords) >= 4 and _find_crossings(coords):
+                invalid_rings.append((pid, poly.outer_ring))
+
+        if not invalid_rings:
+            break
+
+        for pid, ring in invalid_rings:
+            # Re-compute coords: a previous fix in this pass may have updated
+            # a shared edge, already resolving this ring.
+            coords = ring.iter_coords_numpy(topo.edges)
+            crossings = _find_crossings(coords)
+            if not crossings:
+                continue
+
+            seg_to_he = _build_seg_to_he(ring, topo.edges)
+            result = _find_intersected_segment(ring, crossings, seg_to_he, topo.edges)
+            if result is None:
+                continue
+
+            _, edge_id, lo_idx, hi_idx = result
+            edge = topo.edges[edge_id]
+            point = _best_restore_for_segment(
+                edge, original_edge_coords[edge_id], lo_idx, hi_idx
+            )
+            if point is None:
+                continue
+
+            _insert_point(edge, point, original_edge_coords[edge_id])
+            total_restorations += 1
+
+    return total_restorations
 
 
 def to_qgs_features(topo: TopoLayer) -> list[QgsFeature]:

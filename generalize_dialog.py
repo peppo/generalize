@@ -26,7 +26,7 @@ _active_tasks = []
 
 
 class _GeneralizeTask(QgsTask):
-    def __init__(self, layer, percentage, iface, repair=True, constrained=False, dissolve_small=False):
+    def __init__(self, layer, percentage, iface, repair=True, constrained=False, dissolve_small=False, repair_inversions=False):
         super().__init__(
             f"Generalizing '{layer.name()}' ({percentage}% reduction)",
             QgsTask.CanCancel,
@@ -34,8 +34,9 @@ class _GeneralizeTask(QgsTask):
         self.input_layer = layer
         self.percentage = percentage
         self.iface = iface
-        self.repair = repair        
+        self.repair = repair
         self.dissolve_small = dissolve_small
+        self.repair_inversions = repair_inversions
         # Capture layer metadata on the main thread before the task starts.
         self.crs_authid = layer.crs().authid()
         self.output_name = layer.name() + '_generalized'
@@ -57,8 +58,9 @@ class _GeneralizeTask(QgsTask):
                 self.input_layer,
                 self.percentage,
                 progress_callback=progress_callback,
-                add_to_project=False,                
+                add_to_project=False,
                 dissolve_small=self.dissolve_small,
+                repair_inversions=self.repair_inversions,
             )
         except Exception as e:
             self.exception = e
@@ -180,6 +182,11 @@ class GeneralizeDialog(QDialog):
         self.dissolve_small_checkbox.setChecked(False)
         self.layout.addWidget(self.dissolve_small_checkbox)
 
+        # Repair ring inversions checkbox
+        self.repair_inversions_checkbox = QCheckBox('Repair ring inversions')
+        self.repair_inversions_checkbox.setChecked(False)
+        self.layout.addWidget(self.repair_inversions_checkbox)
+
         # Buttons
         self.button_layout = QHBoxLayout()
         self.ok_button = QPushButton('OK')
@@ -217,7 +224,8 @@ class GeneralizeDialog(QDialog):
         percentage = self.pct_spinbox.value()
         repair = self.repair_checkbox.isChecked()
         dissolve_small = self.dissolve_small_checkbox.isChecked()
-        task = _GeneralizeTask(layer, percentage, self.iface, repair=repair, dissolve_small=dissolve_small)
+        repair_inversions = self.repair_inversions_checkbox.isChecked()
+        task = _GeneralizeTask(layer, percentage, self.iface, repair=repair, dissolve_small=dissolve_small, repair_inversions=repair_inversions)
         _active_tasks.append(task)
 
         def _cleanup():

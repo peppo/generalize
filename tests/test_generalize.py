@@ -200,7 +200,8 @@ class TestInvertValidGeometry(unittest.TestCase):
         from generalize.api import generalize_polygon_layer
         layer = _load_layer(_INVERT)
         features, _, _ = generalize_polygon_layer(
-            layer, percentage=90, add_to_project=False
+            layer, percentage=90, add_to_project=False,
+            repair_inversions=True,
         )
         cls.features = features
 
@@ -272,7 +273,8 @@ class TestInvert2ValidGeometry(unittest.TestCase):
         from generalize.api import generalize_polygon_layer
         layer = _load_layer(_INVERT2)
         features, _, _ = generalize_polygon_layer(
-            layer, percentage=90, add_to_project=False
+            layer, percentage=90, add_to_project=False,
+            repair_inversions=True,
         )
         cls.features = features
 

@@ -3,7 +3,7 @@ import time
 import processing
 from qgis.core import QgsVectorLayer, QgsWkbTypes, QgsProject, QgsMessageLog, Qgis
 
-from .topology_builder import build, dissolve_small_rings, remove_collinear_vertices, snap_to_self, to_qgs_features
+from .topology_builder import build, dissolve_small_rings, repair_ring_inversions, remove_collinear_vertices, snap_to_self, to_qgs_features
 from .visvalingam import simplify_arc, simplify_polygon
 
 LOG_TAG = "Generalize"
@@ -40,8 +40,9 @@ def generalize_polygon_layer(
     output_layer=None,
     progress_callback=None,
     snap_tolerance: float = 0.0,
-    add_to_project: bool = True,    
+    add_to_project: bool = True,
     dissolve_small: bool = False,
+    repair_inversions: bool = False,
 ):
     """
     Generalize a polygon layer using the topological Visvalingam algorithm.
@@ -123,6 +124,10 @@ def generalize_polygon_layer(
 
         edge_other_rings: dict[int, list] = {}
 
+        # Snapshot original coords before simplification so repair_ring_inversions
+        # can restore removed points if needed.
+        original_edge_coords = {edge.id: edge.coords.copy() for edge in edges}
+
         # --- 3. Simplify every edge exactly once ---
         _log(f"Simplifying {total_edges} edges …")
         t2 = time.perf_counter()
@@ -145,7 +150,15 @@ def generalize_polygon_layer(
              f"{total_vertices:,} → {simplified_vertices:,} vertices "
              f"({100 * (1 - simplified_vertices / total_vertices):.1f}% reduction)")
 
-        # --- 4. Drop small rings / parts (dissolve_small mode) ---
+        # --- 4. Repair self-intersecting rings (optional) ---
+        if repair_inversions:
+            t_ir = time.perf_counter()
+            n_restored = repair_ring_inversions(topo, original_edge_coords)
+            if n_restored:
+                _log(f"Inversion repair: {n_restored} point(s) restored "
+                     f"in {time.perf_counter() - t_ir:.1f}s")
+
+        # --- 5. Drop small rings / parts (dissolve_small mode) ---
         if dissolve_small:
             t_ds = time.perf_counter()
             n_parts, n_holes = dissolve_small_rings(topo)
@@ -153,7 +166,7 @@ def generalize_polygon_layer(
                 _log(f"Dissolve small: removed {n_parts} part(s) and "
                      f"{n_holes} hole(s) in {time.perf_counter() - t_ds:.1f}s")
 
-        # --- 5. Collect QgsFeatures from the simplified topology ---
+        # --- 6. Collect QgsFeatures from the simplified topology ---
         t5 = time.perf_counter()
         _log("Reconstructing features …")
         features = []
@@ -174,18 +187,8 @@ def generalize_polygon_layer(
     if skipped:
         _log(f"Warning: {skipped} feature(s) collapsed to empty geometry and were skipped.")
 
-    # --- 5. Post-simplification validity check (and repair in constrained mode) ---
-    invalid_after = 0
-    repaired = 0
-    for feat in features:
-        geom = feat.geometry()
-        if geom.isGeosValid():
-            continue
-        invalid_after += 1  
-        fixed = geom.makeValid()
-        if not fixed.isNull() and fixed.area() > 0:
-            feat.setGeometry(fixed)
-            repaired += 1
+    # --- 7. Post-simplification validity check (log only) ---
+    invalid_after = sum(1 for f in features if not f.geometry().isGeosValid())
     if invalid_after == 0:
         _log(f"Post-simplification check: all {new_count} output geometries are valid.")
     else:
