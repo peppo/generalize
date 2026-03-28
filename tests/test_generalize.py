@@ -45,6 +45,7 @@ _UNTRASRIED             = os.path.join(_DATA_ROOT, 'untrasried',              'u
 _TOO_FEW_POINTS         = os.path.join(_DATA_ROOT, 'too_few_points',         'too_few_points.geojson')
 _SELF_INTERSECTION      = os.path.join(_DATA_ROOT, 'self_intersection',       'self_intersection.geojson')
 _SLIVER2               = os.path.join(_DATA_ROOT, 'sliver2',              'sliver2.geojson')
+_SLIVER3               = os.path.join(_DATA_ROOT, 'sliver3',              'sliver3.geojson')
 
 
 def _load_layer(path: str):
@@ -580,6 +581,50 @@ class TestSliver2NoSliver(unittest.TestCase):
             len(features), input_count,
             f'dissolve_small dropped entire features: '
             f'got {len(features)}, expected {input_count}',
+        )
+
+
+class TestSliver3NoSliver(unittest.TestCase):
+    """
+    Regression test for the Bischofsgrüner Forst area.
+
+    At 90% reduction the small exclave/island of Bischofsgrüner Forst must not
+    be dissolved away, leaving a geographic hole in the output dataset.
+    dissolve_small=True must preserve all input features.
+    """
+
+    PERCENTAGE = 90
+
+    @classmethod
+    def setUpClass(cls):
+        from generalize.api import generalize_polygon_layer
+        layer = _load_layer(_SLIVER3)
+        cls.layer = layer
+        cls.features, _, _ = generalize_polygon_layer(
+            layer, percentage=cls.PERCENTAGE, add_to_project=False,
+        )
+
+    def test_no_geographic_hole(self):
+        """
+        The Bischofsgrüner Forst exclave (a small part of a multipart feature)
+        must not collapse, leaving a geographic hole in the output dataset.
+
+        The union of all output features must fully cover the union of all input
+        features — i.e. no area that was covered before is left uncovered.
+        """
+        from qgis.core import QgsGeometry
+        input_union = QgsGeometry.unaryUnion(
+            [f.geometry() for f in self.layer.getFeatures()]
+        )
+        output_union = QgsGeometry.unaryUnion(
+            [f.geometry() for f in self.features]
+        )
+        uncovered = input_union.difference(output_union)
+        uncovered_area = uncovered.area() if not uncovered.isNull() else 0.0
+        self.assertAlmostEqual(
+            uncovered_area, 0.0, delta=1.0,
+            msg=f'Output has a geographic hole of {uncovered_area:.1f} m² — '
+                f'Bischofsgrüner Forst exclave may have collapsed',
         )
 
 
