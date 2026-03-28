@@ -36,6 +36,7 @@ _NO_OVERLAP    = os.path.join(_NO_OVERLAP_DIR, 'no_overlap.geojson')
 _NO_OVERLAP_EXPECTED = os.path.join(_NO_OVERLAP_DIR, 'no_overlap_generalized_expected.geojson')
 _INVERT        = os.path.join(_DATA_ROOT, 'invert',  'invert.geojson')
 _INVERT2       = os.path.join(_DATA_ROOT, 'invert2', 'invert2.geojson')
+_INVERT4       = os.path.join(_DATA_ROOT, 'invert4', 'invert4.geojson')
 _ISLAND        = os.path.join(_DATA_ROOT, 'island_intersect', 'island_intersect.geojson')
 _GEMEINDEN_BAYERN       = os.path.join(_DATA_ROOT, 'gemeinden_bayern',       'VerwaltungsEinheit.shp')
 _GEMEINDEN_DEUTSCHLAND  = os.path.join(_DATA_ROOT, 'gemeinden_deutschland',  'Gemeinden_Deutschland.shp') + '|option:SHAPE_RESTORE_SHX=YES'
@@ -291,6 +292,39 @@ class TestInvert2ValidGeometry(unittest.TestCase):
         self.assertEqual(
             invalid, [],
             'Invalid geometries after 90% generalization of invert2.geojson:\n'
+            + '\n'.join(f'  {msg}' for msg in invalid),
+        )
+
+
+class TestInvert4ValidGeometry(unittest.TestCase):
+    """
+    After generalizing invert4.geojson at 90%, every output feature must be a
+    valid geometry (no self-intersections, including holes).
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        from generalize.api import generalize_polygon_layer
+        layer = _load_layer(_INVERT4)
+        features, _, _ = generalize_polygon_layer(
+            layer, percentage=90, add_to_project=False,
+            repair_inversions=True,
+        )
+        cls.features = features
+
+    def test_all_features_are_valid(self):
+        """Every generalized feature must pass QGIS isGeosValid()."""
+        invalid = []
+        for f in self.features:
+            geom = f.geometry()
+            if not geom.isGeosValid():
+                fid = f.attributes()[0]
+                invalid.append(
+                    f'feature id={fid}: {geom.lastError()}'
+                )
+        self.assertEqual(
+            invalid, [],
+            'Invalid geometries after 90% generalization of invert4.geojson:\n'
             + '\n'.join(f'  {msg}' for msg in invalid),
         )
 

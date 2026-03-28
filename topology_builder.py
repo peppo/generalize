@@ -784,13 +784,30 @@ def _drop_small_loop(
         he_removals.setdefault(he_idx, set()).add(efwd_idx)
 
     # Delete non-junction interior points from each affected edge
+    any_deleted = False
     for he_idx, efwd_indices in he_removals.items():
         edge_id, _fwd = ring.half_edges[he_idx]
         edge = edges[edge_id]
         m = len(edge.coords)
         to_delete = sorted(idx for idx in efwd_indices if 0 < idx < m - 1)
         if to_delete:
+            any_deleted = True
             edge.coords = np.delete(edge.coords, to_delete, axis=0)
+
+    # Fallback: if no interior points were removable in the small loop
+    # (e.g. all mapped to junction nodes when the crossing involves the
+    # closing segment), delete ring_pos[i] — the boundary vertex of the
+    # crossing segment on the small-loop side.  This eliminates the spike
+    # that approaches the junction node and causes the crossing.
+    if not any_deleted:
+        for cand_pos in [i, j]:
+            he_idx, efwd_idx = ring_to_edge[cand_pos]
+            edge_id, _ = ring.half_edges[he_idx]
+            edge = edges[edge_id]
+            m = len(edge.coords)
+            if 0 < efwd_idx < m - 1:
+                edge.coords = np.delete(edge.coords, efwd_idx, axis=0)
+                break
 
     # Cross-edge case: remove half-edges whose every ring position is in the
     # small loop (they are entirely consumed).
@@ -844,9 +861,10 @@ def repair_ring_inversions(
     for attempt in range(max_attempts):
         invalid_rings = []
         for pid, poly in topo.polygons.items():
-            coords = poly.outer_ring.iter_coords_numpy(topo.edges)
-            if len(coords) >= 4 and _find_crossings(coords):
-                invalid_rings.append((pid, poly.outer_ring))
+            for ring in [poly.outer_ring] + poly.inner_rings:
+                coords = ring.iter_coords_numpy(topo.edges)
+                if len(coords) >= 4 and _find_crossings(coords):
+                    invalid_rings.append((pid, ring))
 
         if attempt == 0:
             initial_invalid_count = len(invalid_rings)
