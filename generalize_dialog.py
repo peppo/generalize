@@ -200,10 +200,13 @@ class GeneralizeDialog(QDialog):
         self.setLayout(self.layout)
 
     def populate_layers(self):
+        active = self.iface.activeLayer()
         layers = QgsProject.instance().mapLayers().values()
         for layer in layers:
             if isinstance(layer, QgsVectorLayer) and layer.geometryType() == _PolygonGeometry:
                 self.layer_combo.addItem(layer.name(), layer)
+                if layer == active:
+                    self.layer_combo.setCurrentIndex(self.layer_combo.count() - 1)
 
     def _on_slider_changed(self, value):
         self.pct_spinbox.blockSignals(True)
