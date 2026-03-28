@@ -307,6 +307,47 @@ def _find_best_neighbor(topo: TopoLayer, pid_small: int,
     return best_pid
 
 
+def _find_node_based_neighbor(topo: TopoLayer, pid_small: int,
+                              exclude: set[int]) -> int | None:
+    """
+    Find the polygon with the most edge-length contact at the self-loop junction
+    node of pid_small's outer ring.
+
+    Used as a fallback when _find_best_neighbor finds no shared-edge neighbour.
+    A self-loop edge's start_node == end_node; that node is often a shared
+    junction where other polygons' edges start or end.  We accumulate edge
+    length per polygon across all edges that meet at that node.
+    """
+    small_ring = topo.polygons[pid_small].outer_ring
+    loop_nodes: set[int] = set()
+    small_eids: set[int] = set()
+    for eid, _ in small_ring.half_edges:
+        small_eids.add(eid)
+        e = topo.edges[eid]
+        if e.start_node == e.end_node:
+            loop_nodes.add(e.start_node)
+
+    if not loop_nodes:
+        return None
+
+    pid_lengths: dict[int, float] = defaultdict(float)
+    for eid, edge in topo.edges.items():
+        if eid in small_eids:
+            continue
+        if edge.start_node not in loop_nodes and edge.end_node not in loop_nodes:
+            continue
+        seg_len = 0.0
+        if len(edge.coords) >= 2:
+            d = np.diff(edge.coords, axis=0)
+            seg_len = float(np.hypot(d[:, 0], d[:, 1]).sum())
+        for pid in (edge.left_polygon, edge.right_polygon):
+            if (pid is not None and pid != pid_small
+                    and pid not in exclude and pid in topo.polygons):
+                pid_lengths[pid] += seg_len
+
+    return max(pid_lengths, key=pid_lengths.__getitem__) if pid_lengths else None
+
+
 def _merge_ring_into_neighbor(topo: TopoLayer, pid_small: int,
                                pid_neighbor: int) -> bool:
     """
@@ -369,6 +410,18 @@ def _merge_ring_into_neighbor(topo: TopoLayer, pid_small: int,
         return False
 
     neighbor.outer_ring.half_edges = new_he
+
+    # Update edge polygon references: the non-shared edges of pid_small now
+    # belong to pid_neighbor's boundary.  Without this, those edges keep
+    # left_polygon or right_polygon == pid_small, which becomes a dangling
+    # reference once pid_small is deleted and breaks downstream topology lookups.
+    for eid, _ in a_non_shared:
+        edge = topo.edges[eid]
+        if edge.left_polygon == pid_small:
+            edge.left_polygon = pid_neighbor
+        if edge.right_polygon == pid_small:
+            edge.right_polygon = pid_neighbor
+
     return True
 
 
@@ -481,8 +534,29 @@ def dissolve_small_rings(topo: TopoLayer, threshold: float | None = None) -> tup
         best_nb = _find_best_neighbor(topo, pid, pids_to_remove)
         if best_nb is not None:
             _merge_ring_into_neighbor(topo, pid, best_nb)
+            pids_to_remove.add(pid)
+        else:
+            # No shared-edge neighbour — try node-based neighbour (shared
+            # junction node of the self-loop arc).
+            best_nb = _find_node_based_neighbor(topo, pid, pids_to_remove)
+            if best_nb is not None:
+                # Re-assign the small polygon to the neighbour's feature so it
+                # is included in that feature's output geometry as an extra part.
+                nb_poly = topo.polygons[best_nb]
+                target_fid = nb_poly.feature_id
+                target_parts = [p for p in topo.polygons.values()
+                                if p.feature_id == target_fid]
+                new_part_idx = max(p.part_index for p in target_parts) + 1
+                for p in target_parts:
+                    p.is_multipart = True
+                poly.feature_id   = target_fid
+                poly.part_index   = new_part_idx
+                poly.is_multipart = True
+                # Do NOT add to pids_to_remove — polygon is kept under new fid.
+            else:
+                # Truly isolated — remove without merging.
+                pids_to_remove.add(pid)
 
-        pids_to_remove.add(pid)
         # Also remove the corresponding hole from the parent (if any)
         outer_key = frozenset(eid for eid, _ in poly.outer_ring.half_edges)
         if outer_key in hole_key_to_parent:
