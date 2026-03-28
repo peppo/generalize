@@ -606,25 +606,65 @@ class TestSliver3NoSliver(unittest.TestCase):
 
     def test_no_geographic_hole(self):
         """
-        The Bischofsgrüner Forst exclave (a small part of a multipart feature)
-        must not collapse, leaving a geographic hole in the output dataset.
-
-        The union of all output features must fully cover the union of all input
-        features — i.e. no area that was covered before is left uncovered.
+        The Bischofsgrüner Forst exclave fills a hole in the surrounding feature.
+        If the exclave collapses, that hole is left unfilled and the union of all
+        output features has an interior ring.  The union must be hole-free.
         """
         from qgis.core import QgsGeometry
-        input_union = QgsGeometry.unaryUnion(
-            [f.geometry() for f in self.layer.getFeatures()]
-        )
         output_union = QgsGeometry.unaryUnion(
             [f.geometry() for f in self.features]
         )
-        uncovered = input_union.difference(output_union)
-        uncovered_area = uncovered.area() if not uncovered.isNull() else 0.0
-        self.assertAlmostEqual(
-            uncovered_area, 0.0, delta=1.0,
-            msg=f'Output has a geographic hole of {uncovered_area:.1f} m² — '
-                f'Bischofsgrüner Forst exclave may have collapsed',
+        if output_union.isMultipart():
+            rings_per_part = [len(rings) for rings in output_union.asMultiPolygon()]
+        else:
+            rings_per_part = [len(output_union.asPolygon())]
+        holes = sum(r - 1 for r in rings_per_part)
+        self.assertEqual(
+            holes, 0,
+            f'Output union has {holes} hole(s) — '
+            f'Bischofsgrüner Forst exclave may have collapsed',
+        )
+
+
+class TestSliver3aNoSliver(unittest.TestCase):
+    """
+    Regression test for the Bischofsgrüner Forst area with dissolve_small=True.
+
+    When dissolve_small is active, the small exclave that would otherwise
+    collapse must instead be merged into an adjacent ring — no geographic hole.
+    """
+
+    PERCENTAGE = 90
+
+    @classmethod
+    def setUpClass(cls):
+        from generalize.api import generalize_polygon_layer
+        layer = _load_layer(_SLIVER3)
+        cls.layer = layer
+        cls.features, _, _ = generalize_polygon_layer(
+            layer, percentage=cls.PERCENTAGE, add_to_project=False,
+            dissolve_small=True,
+        )
+
+    def test_no_geographic_hole(self):
+        """
+        With dissolve_small=True the Bischofsgrüner Forst exclave must be
+        merged into a neighbouring ring rather than dropped, so the union of
+        all output features must be hole-free.
+        """
+        from qgis.core import QgsGeometry
+        output_union = QgsGeometry.unaryUnion(
+            [f.geometry() for f in self.features]
+        )
+        if output_union.isMultipart():
+            rings_per_part = [len(rings) for rings in output_union.asMultiPolygon()]
+        else:
+            rings_per_part = [len(output_union.asPolygon())]
+        holes = sum(r - 1 for r in rings_per_part)
+        self.assertEqual(
+            holes, 0,
+            f'Output union has {holes} hole(s) even with dissolve_small=True — '
+            f'Bischofsgrüner Forst exclave was not merged into a neighbour',
         )
 
 
