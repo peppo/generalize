@@ -395,7 +395,7 @@ def simplify_arc(coords, percentage, cascade=False, constrained=False,
     n = len(coords)
     if n <= 2:
         return coords
-    keep_count = max(2, int(n * (1 - percentage / 100)))
+    keep_count = max(3, int(n * (1 - percentage / 100)))
     if constrained:
         return _visvalingam_cascade_constrained(coords, keep_count,
                                                 other_rings=other_rings)

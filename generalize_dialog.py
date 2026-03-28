@@ -149,7 +149,7 @@ class GeneralizeDialog(QDialog):
         self.slider = QSlider(_Qt_Horizontal)
         self.slider.setMinimum(0)
         self.slider.setMaximum(99)
-        self.slider.setValue(50)
+        self.slider.setValue(90)
 
         self.pct_spinbox = QDoubleSpinBox()
         self.pct_spinbox.setMinimum(0.0)
@@ -157,7 +157,7 @@ class GeneralizeDialog(QDialog):
         self.pct_spinbox.setDecimals(1)
         self.pct_spinbox.setSingleStep(0.1)
         self.pct_spinbox.setSuffix(' %')
-        self.pct_spinbox.setValue(50.0)
+        self.pct_spinbox.setValue(90.0)
 
         self.slider.valueChanged.connect(self._on_slider_changed)
         self.pct_spinbox.valueChanged.connect(self._on_spinbox_changed)
