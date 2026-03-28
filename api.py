@@ -97,10 +97,13 @@ def generalize_polygon_layer(
     else:
         layer = input_layer
 
-    # Progress weights based on measured timing on gemeinden_bayern (50%):
-    #   unconstrained: topology 96 %, simplification  3 %, reconstruction 1 %
-    W_TOPO = 96.0
-    W_SIMP =  3.0
+    # Progress weights based on measured timing on gemeinden_mittelfranken (50%):
+    #   without repair_inversions: topology 96 %, simplification  3 %, reconstruction 1 %
+    #   with    repair_inversions: topology 32 %, simplification  2 %, repair 65 %, reconstruction 1 %
+    if repair_inversions:
+        W_TOPO, W_SIMP, W_REPAIR = 32.0, 2.0, 65.0
+    else:
+        W_TOPO, W_SIMP, W_REPAIR = 96.0, 3.0,  0.0
 
     def _set_progress(pct):
         """Update progress; raise _Cancelled if the callback signals cancellation."""
@@ -152,8 +155,10 @@ def generalize_polygon_layer(
 
         # --- 4. Repair self-intersecting rings (optional) ---
         if repair_inversions:
+            _set_progress(W_TOPO + W_SIMP)
             t_ir = time.perf_counter()
             n_repairs, n_invalid = repair_ring_inversions(topo, original_edge_coords)
+            _set_progress(W_TOPO + W_SIMP + W_REPAIR)
             _log(f"Inversion repair: {n_invalid} ring(s) needed repair, "
                  f"{n_repairs} action(s) taken in {time.perf_counter() - t_ir:.1f}s")
 

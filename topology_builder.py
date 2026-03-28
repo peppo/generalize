@@ -509,22 +509,6 @@ def _signed_area(coords: np.ndarray) -> float:
     return float(np.sum(x * yn - xn * y)) / 2.0
 
 
-def _seg_intersect_params(p1, p2, p3, p4):
-    """
-    Return (t, u) for the intersection of segment (p1, p2) and (p3, p4),
-    or None if they are parallel/collinear.
-    Proper intersection requires 0 < t < 1 and 0 < u < 1.
-    """
-    d1 = p2 - p1
-    d2 = p4 - p3
-    cross = float(d1[0] * d2[1] - d1[1] * d2[0])
-    if abs(cross) < 1e-12:
-        return None
-    d3 = p3 - p1
-    t = float(d3[0] * d2[1] - d3[1] * d2[0]) / cross
-    u = float(d3[0] * d1[1] - d3[1] * d1[0]) / cross
-    return t, u
-
 
 def _find_crossings(coords):
     """
@@ -533,21 +517,74 @@ def _find_crossings(coords):
 
     coords: (n+1, 2) numpy array, closed (coords[0] == coords[-1]).
     Returns a list of (i, j) segment-index pairs.
+
+    Implementation: row-by-row with a bounding-box pre-filter.  For each
+    segment i we first keep only the j candidates whose axis-aligned bounding
+    box overlaps segment i's box, then run the full intersection formula on
+    that typically-small subset.  This keeps memory at O(n) per step (vs the
+    naive O(n²) block allocation) and skips the expensive cross-product math
+    for the vast majority of non-overlapping pairs.
     """
     n = len(coords) - 1  # number of segments
+    if n < 4:
+        return []
+
     eps = 1e-9
+
+    # Segment start points, direction vectors, and axis-aligned bounding boxes
+    p = coords[:-1]                    # (n, 2)
+    r = coords[1:] - p                 # (n, 2)
+    end = p + r                        # (n, 2)  == coords[1:]
+
+    x_lo = np.minimum(p[:, 0], end[:, 0])   # (n,)
+    x_hi = np.maximum(p[:, 0], end[:, 0])
+    y_lo = np.minimum(p[:, 1], end[:, 1])
+    y_hi = np.maximum(p[:, 1], end[:, 1])
+
+    # Pre-built index array so inner-loop slices are zero-copy views
+    all_j = np.arange(n)
+
     crossings = []
+
     for i in range(n):
-        p1, p2 = coords[i], coords[i + 1]
-        for j in range(i + 2, n):
-            if i == 0 and j == n - 1:
-                continue  # first and last segments share coords[0]
-            p3, p4 = coords[j], coords[j + 1]
-            params = _seg_intersect_params(p1, p2, p3, p4)
-            if params is not None:
-                t, u = params
-                if eps < t < 1 - eps and eps < u < 1 - eps:
-                    crossings.append((i, j))
+        # Non-adjacent j range; exclude wrap-around pair (0, n-1)
+        j_end = (n - 1) if i == 0 else n
+        j_start = i + 2
+        if j_start >= j_end:
+            continue
+
+        # Contiguous array slices are zero-copy views — no per-row allocation
+        xl_j = x_lo[j_start:j_end]
+        xh_j = x_hi[j_start:j_end]
+        yl_j = y_lo[j_start:j_end]
+        yh_j = y_hi[j_start:j_end]
+
+        # Bounding-box pre-filter
+        bbox_ok = (
+            (x_lo[i] <= xh_j) & (xl_j <= x_hi[i]) &
+            (y_lo[i] <= yh_j) & (yl_j <= y_hi[i])
+        )
+        if not bbox_ok.any():
+            continue
+
+        js = all_j[j_start:j_end][bbox_ok]   # view then fancy-index: compact
+
+        # Full intersection formula on surviving candidates
+        ri = r[i]                      # (2,)
+        dj = p[js] - p[i]             # (k, 2)
+        rj = r[js]                     # (k, 2)
+
+        cross = ri[0] * rj[:, 1] - ri[1] * rj[:, 0]   # (k,)
+        non_par = np.abs(cross) > 1e-12
+        safe = np.where(non_par, cross, 1.0)
+
+        t = (dj[:, 0] * rj[:, 1] - dj[:, 1] * rj[:, 0]) / safe
+        u = (dj[:, 0] * ri[1]    - dj[:, 1] * ri[0])    / safe
+
+        hit = non_par & (t > eps) & (t < 1.0 - eps) & (u > eps) & (u < 1.0 - eps)
+        for j in js[hit]:
+            crossings.append((i, int(j)))
+
     return crossings
 
 
@@ -858,10 +895,20 @@ def repair_ring_inversions(
     total_repairs = 0
     initial_invalid_count = 0
 
+    # After the first pass, only rings that share an edge with a repaired ring
+    # need re-checking.  ``dirty_edges`` holds the set of edge_ids modified in
+    # the previous pass; None means "check everything" (first pass).
+    dirty_edges: set[int] | None = None
+
     for attempt in range(max_attempts):
         invalid_rings = []
         for pid, poly in topo.polygons.items():
             for ring in [poly.outer_ring] + poly.inner_rings:
+                # Skip rings that share no dirty edges (optimization: only on
+                # passes after the first, when we know which edges changed).
+                if dirty_edges is not None:
+                    if not any(eid in dirty_edges for eid, _ in ring.half_edges):
+                        continue
                 coords = ring.iter_coords_numpy(topo.edges)
                 if len(coords) >= 4 and _find_crossings(coords):
                     invalid_rings.append((pid, ring))
@@ -871,6 +918,10 @@ def repair_ring_inversions(
 
         if not invalid_rings:
             break
+
+        # Collect edges dirtied in this repair pass so the next pass can skip
+        # rings that cannot have been newly invalidated.
+        dirty_edges = set()
 
         for pid, ring in invalid_rings:
             # Re-fetch coords: a shared-edge fix earlier in this pass may
@@ -887,6 +938,7 @@ def repair_ring_inversions(
                 total_area = area_a + area_b
                 if total_area > 0 and min(area_a, area_b) / total_area < _FIGURE8_RATIO:
                     _drop_small_loop(ring, topo.edges, crossing, coords)
+                    dirty_edges.update(eid for eid, _ in ring.half_edges)
                     total_repairs += 1
                     case2_done = True
                     break  # re-evaluate the ring in the next pass
@@ -909,6 +961,7 @@ def repair_ring_inversions(
                 continue
 
             _insert_point(edge, point, original_edge_coords[edge_id])
+            dirty_edges.add(edge_id)
             total_repairs += 1
 
     return total_repairs, initial_invalid_count
