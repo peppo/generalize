@@ -242,7 +242,8 @@ class TestIslandIntersectValidGeometry(unittest.TestCase):
         from generalize.api import generalize_polygon_layer
         layer = _load_layer(_ISLAND)
         features, _, _ = generalize_polygon_layer(
-            layer, percentage=90, add_to_project=False
+            layer, percentage=90, add_to_project=False,
+            repair_inversions=True,
         )
         cls.features = features
 
@@ -351,6 +352,7 @@ class TestTooFewPointsValidGeometry(unittest.TestCase):
         layer = _load_layer(_TOO_FEW_POINTS)
         features, _, _ = generalize_polygon_layer(
             layer, percentage=cls.PERCENTAGE, add_to_project=False,
+            repair_inversions=True,
         )
         cls.features = features
 
@@ -647,6 +649,7 @@ class TestUntrasriedValidGeometry(unittest.TestCase):
         layer = _load_layer(_UNTRASRIED)
         features, _, _ = generalize_polygon_layer(
             layer, percentage=cls.PERCENTAGE, add_to_project=False,
+            repair_inversions=True,
         )
         cls.features = features
 
