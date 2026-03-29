@@ -28,7 +28,7 @@ _active_tasks = []
 class _GeneralizeTask(QgsTask):
     def __init__(self, layer, percentage, iface, repair=True, constrained=False, dissolve_small=False, repair_inversions=False):
         super().__init__(
-            f"Generalizing '{layer.name()}' ({percentage}% reduction)",
+            f"Generalizing '{layer.name()}' ({percentage}% reduction)",  # task manager label, not translated
             QgsTask.CanCancel,
         )
         self.input_layer = layer
@@ -91,13 +91,13 @@ class _GeneralizeTask(QgsTask):
 
     def finished(self, result):
         if self.isCanceled():
-            self.iface.messageBar().pushInfo("Generalize", "Generalization cancelled.")
+            self.iface.messageBar().pushInfo("Generalize", self.tr("Generalization cancelled."))
             return
 
         if not result:
             msg = str(self.exception) if self.exception else "Unknown error"
             QgsMessageLog.logMessage(f"Generalization failed: {msg}", "Generalize", Qgis.Critical)
-            self.iface.messageBar().pushCritical("Generalize", f"Failed: {msg}")
+            self.iface.messageBar().pushCritical("Generalize", self.tr("Failed: ") + msg)
             return
 
         # Create the layer on the main thread to avoid Qt thread-affinity issues.
@@ -125,7 +125,9 @@ class _GeneralizeTask(QgsTask):
         if self.new_count < self.original_count:
             self.iface.messageBar().pushWarning(
                 "Generalize",
-                f"{self.original_count - self.new_count} feature(s) collapsed and were removed.",
+                self.tr("{count} feature(s) collapsed and were removed.").format(
+                    count=self.original_count - self.new_count
+                ),
             )
 
 
@@ -133,19 +135,19 @@ class GeneralizeDialog(QDialog):
     def __init__(self, iface):
         super().__init__()
         self.iface = iface
-        self.setWindowTitle('Generalize Polygons')
+        self.setWindowTitle(self.tr('Generalize Polygons'))
         self.setModal(True)
         self.layout = QVBoxLayout()
 
         # Layer selection
-        self.layer_label = QLabel('Select Polygon Layer:')
+        self.layer_label = QLabel(self.tr('Select Polygon Layer:'))
         self.layer_combo = QComboBox()
         self.populate_layers()
         self.layout.addWidget(self.layer_label)
         self.layout.addWidget(self.layer_combo)
 
         # Percentage slider + spinbox
-        self.slider_label = QLabel('Reduction Percentage:')
+        self.slider_label = QLabel(self.tr('Reduction Percentage:'))
         self.slider = QSlider(_Qt_Horizontal)
         self.slider.setMinimum(0)
         self.slider.setMaximum(99)
@@ -171,27 +173,25 @@ class GeneralizeDialog(QDialog):
         self.layout.addWidget(self.slider)
 
         # Repair geometry checkbox
-        self.repair_checkbox = QCheckBox('Repair geometry if necessary')
+        self.repair_checkbox = QCheckBox(self.tr('Repair geometry if necessary'))
         self.repair_checkbox.setChecked(True)
         self.layout.addWidget(self.repair_checkbox)
-        
+
         # Dissolve small parts/holes checkbox
-        self.dissolve_small_checkbox = QCheckBox(
-            'Dissolve small parts and holes'
-        )
+        self.dissolve_small_checkbox = QCheckBox(self.tr('Dissolve small parts and holes'))
         self.dissolve_small_checkbox.setChecked(False)
         self.layout.addWidget(self.dissolve_small_checkbox)
 
         # Repair ring inversions checkbox
-        self.repair_inversions_checkbox = QCheckBox('Repair ring inversions')
+        self.repair_inversions_checkbox = QCheckBox(self.tr('Repair ring inversions'))
         self.repair_inversions_checkbox.setChecked(False)
         self.layout.addWidget(self.repair_inversions_checkbox)
 
         # Buttons
         self.button_layout = QHBoxLayout()
-        self.ok_button = QPushButton('OK')
+        self.ok_button = QPushButton(self.tr('OK'))
         self.ok_button.clicked.connect(self.accept)
-        self.cancel_button = QPushButton('Cancel')
+        self.cancel_button = QPushButton(self.tr('Cancel'))
         self.cancel_button.clicked.connect(self.reject)
         self.button_layout.addWidget(self.ok_button)
         self.button_layout.addWidget(self.cancel_button)
@@ -221,7 +221,7 @@ class GeneralizeDialog(QDialog):
     def accept(self):
         layer = self.layer_combo.currentData()
         if not layer:
-            QMessageBox.warning(self, 'Error', 'No layer selected.')
+            QMessageBox.warning(self, self.tr('Error'), self.tr('No layer selected.'))
             return
 
         percentage = self.pct_spinbox.value()

@@ -9,6 +9,7 @@ so it can be installed via QGIS > Plugins > Install from ZIP.
 """
 
 import re
+import subprocess
 import sys
 import zipfile
 from pathlib import Path
@@ -33,11 +34,20 @@ EXCLUDE_NAMES = {
 EXCLUDE_DIRS = {
     'tests',
     'test_data',
+    'test_output',
     '__pycache__',
     '.git',
+    '.pytest_cache',
 }
 
-EXCLUDE_SUFFIXES = {'.pyc', '.pyo'}
+EXCLUDE_SUFFIXES = {'.pyc', '.pyo', '.ts'}   # .ts sources excluded; only .qm binaries ship
+
+# Path to lrelease.  Override via environment variable LRELEASE if needed.
+import os as _os
+LRELEASE = _os.environ.get(
+    'LRELEASE',
+    r'd:\dev\qt\6.11.0\mingw_64\bin\lrelease.exe',
+)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -75,7 +85,33 @@ def iter_plugin_files():
 # Main
 # ---------------------------------------------------------------------------
 
+def compile_translations():
+    """Compile every i18n/*.ts file to a .qm binary next to it."""
+    i18n_dir = PLUGIN_DIR / 'i18n'
+    ts_files = sorted(i18n_dir.glob('*.ts'))
+    if not ts_files:
+        return
+    lrelease = Path(LRELEASE)
+    if not lrelease.exists():
+        print(f"WARNING: lrelease not found at {lrelease} — skipping translation compile.")
+        print("         Set the LRELEASE environment variable to the correct path.")
+        return
+    for ts in ts_files:
+        qm = ts.with_suffix('.qm')
+        result = subprocess.run(
+            [str(lrelease), str(ts), '-qm', str(qm)],
+            capture_output=True, text=True,
+        )
+        if result.returncode == 0:
+            print(f"  Compiled {ts.name} → {qm.name}")
+        else:
+            print(f"  ERROR compiling {ts.name}:\n{result.stderr}")
+            sys.exit(1)
+
+
 def main():
+    compile_translations()
+
     version = read_version()
     out_path = PLUGIN_DIR.parent / f"{PLUGIN_NAME}-{version}.zip"
 

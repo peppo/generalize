@@ -12,6 +12,7 @@ from qgis.core import (
     QgsProcessing,
     QgsWkbTypes,
 )
+from qgis.PyQt.QtCore import QCoreApplication
 from qgis.PyQt.QtGui import QIcon
 
 from .api import generalize_polygon_layer
@@ -27,11 +28,14 @@ class GeneralizeAlgorithm(QgsProcessingAlgorithm):
     REPAIR_INVERSIONS = 'REPAIR_INVERSIONS'
     OUTPUT            = 'OUTPUT'
 
+    def tr(self, string):
+        return QCoreApplication.translate('GeneralizeAlgorithm', string)
+
     def name(self):
         return 'generalizepolygons'
 
     def displayName(self):
-        return 'Generalize polygons (topology-aware)'
+        return self.tr('Generalize polygons (topology-aware)')
 
     def group(self):
         return ''
@@ -40,7 +44,7 @@ class GeneralizeAlgorithm(QgsProcessingAlgorithm):
         return ''
 
     def shortHelpString(self):
-        return (
+        return self.tr(
             'Simplifies polygon boundaries using the topology-aware Visvalingam '
             'algorithm. Shared edges between adjacent polygons are simplified '
             'exactly once, so no slivers or gaps are introduced between neighbours.\n\n'
@@ -49,7 +53,7 @@ class GeneralizeAlgorithm(QgsProcessingAlgorithm):
             'output; lower values stay closer to the original shape.\n\n'
             '<b>Dissolve small parts and holes</b>: after simplification, removes '
             'polygon parts and holes whose area falls below an automatic threshold '
-            '(2 × average segment length²). Useful for cleaning up tiny slivers '
+            '(2 \u00d7 average segment length\u00b2). Useful for cleaning up tiny slivers '
             'or island artefacts. At least one part per feature is always kept.\n\n'
             '<b>Repair ring inversions</b>: if aggressive simplification causes a '
             'ring to self-intersect (fold over itself), this option detects and '
@@ -65,24 +69,24 @@ class GeneralizeAlgorithm(QgsProcessingAlgorithm):
 
     def initAlgorithm(self, config=None):
         self.addParameter(QgsProcessingParameterVectorLayer(
-            self.INPUT, 'Input layer',
+            self.INPUT, self.tr('Input layer'),
             types=[QgsProcessing.TypeVectorPolygon],
         ))
         self.addParameter(QgsProcessingParameterNumber(
-            self.PERCENTAGE, 'Reduction percentage (%)',
+            self.PERCENTAGE, self.tr('Reduction percentage (%)'),
             type=QgsProcessingParameterNumber.Double,
             minValue=0.0, maxValue=99.9, defaultValue=90.0,
         ))
         self.addParameter(QgsProcessingParameterBoolean(
-            self.DISSOLVE_SMALL, 'Dissolve small parts and holes',
+            self.DISSOLVE_SMALL, self.tr('Dissolve small parts and holes'),
             defaultValue=False,
         ))
         self.addParameter(QgsProcessingParameterBoolean(
-            self.REPAIR_INVERSIONS, 'Repair ring inversions',
+            self.REPAIR_INVERSIONS, self.tr('Repair ring inversions'),
             defaultValue=False,
         ))
         self.addParameter(QgsProcessingParameterFeatureSink(
-            self.OUTPUT, 'Generalized',
+            self.OUTPUT, self.tr('Generalized'),
             type=QgsProcessing.TypeVectorPolygon,
         ))
 
@@ -140,14 +144,17 @@ class GeneralizeAlgorithm(QgsProcessingAlgorithm):
 
 class GeneralizeProvider(QgsProcessingProvider):
 
+    def tr(self, string):
+        return QCoreApplication.translate('GeneralizeProvider', string)
+
     def id(self):
         return 'generalize'
 
     def name(self):
-        return 'Generalize'
+        return self.tr('Generalize')
 
     def longName(self):
-        return 'Topology-aware polygon generalisation'
+        return self.tr('Topology-aware polygon generalisation')
 
     def icon(self):
         return QIcon(os.path.join(_PLUGIN_DIR, 'icon.svg'))
