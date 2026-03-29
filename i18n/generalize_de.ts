@@ -70,7 +70,7 @@
     <name>GeneralizeAlgorithm</name>
     <message>
         <source>Generalize polygons (topology-aware)</source>
-        <translation>Polygone generalisieren (topologiebewusst)</translation>
+        <translation>Polygone generalisieren</translation>
     </message>
     <message>
         <source>Simplifies polygon boundaries using the topology-aware Visvalingam algorithm. Shared edges between adjacent polygons are simplified exactly once, so no slivers or gaps are introduced between neighbours.
@@ -79,14 +79,14 @@
 
 &lt;b&gt;Dissolve small parts and holes&lt;/b&gt;: after simplification, removes polygon parts and holes whose area falls below an automatic threshold (2 × average segment length²). Useful for cleaning up tiny slivers or island artefacts. At least one part per feature is always kept.
 
-&lt;b&gt;Repair ring inversions&lt;/b&gt;: if aggressive simplification causes a ring to self-intersect (fold over itself), this option detects and corrects the inversion by restoring a small number of original vertices. Adds processing time on large datasets.</source>
+&lt;b&gt;Repair ring inversions&lt;/b&gt;: if aggressive simplification causes a ring to self-intersect (fold over itself), this option detects and corrects the inversion by restoring a small number of original vertices. Adds processing time on large datasets. It might be a good idea to ensure that the input layer is valid and does not contain overlapping polygons. After the generalization, the output layer should be checked for validity and repaired if necessary.</source>
         <translation>Vereinfacht Polygongrenzen mithilfe des topologiebewussten Visvalingam-Algorithmus. Gemeinsame Kanten zwischen benachbarten Polygonen werden genau einmal vereinfacht, sodass zwischen Nachbarn keine Splitter oder Lücken entstehen.
 
 &lt;b&gt;Reduktionsgrad&lt;/b&gt;: Gibt an, wie stark vereinfacht wird. 90 % entfernen 90 % der Stützpunkte. Höhere Werte erzeugen gröbere Ergebnisse; niedrigere Werte bleiben näher an der ursprünglichen Form.
 
 &lt;b&gt;Kleine Teile und Löcher auflösen&lt;/b&gt;: Entfernt nach der Vereinfachung Polygonteile und Löcher, deren Fläche unter einem automatisch berechneten Schwellenwert liegt (2 × mittlere Segmentlänge²). Nützlich zum Bereinigen kleiner Splitter oder Inselartefakte. Pro Objekt wird mindestens ein Teil behalten.
 
-&lt;b&gt;Ringinversionen reparieren&lt;/b&gt;: Wenn eine aggressive Vereinfachung dazu führt, dass sich ein Ring selbst schneidet (überfaltet), erkennt und korrigiert diese Option die Inversion durch Wiederherstellung einer kleinen Anzahl ursprünglicher Stützpunkte. Erhöht die Verarbeitungszeit bei großen Datensätzen.</translation>
+&lt;b&gt;Ringinversionen reparieren&lt;/b&gt;: Wenn eine aggressive Vereinfachung dazu führt, dass sich ein Ring selbst schneidet (überfaltet), erkennt und korrigiert diese Option die Inversion durch Wiederherstellung einer kleinen Anzahl ursprünglicher Stützpunkte. Erhöht die Verarbeitungszeit bei großen Datensätzen. Es empfiehlt sich sicherzustellen, dass der Eingabelayer gültig ist und keine überlappenden Polygone enthält. Nach der Generalisierung sollte der Ausgabelayer auf Gültigkeit geprüft und bei Bedarf repariert werden.</translation>
     </message>
     <message>
         <source>Input layer</source>

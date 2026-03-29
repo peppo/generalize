@@ -58,7 +58,9 @@ class GeneralizeAlgorithm(QgsProcessingAlgorithm):
             '<b>Repair ring inversions</b>: if aggressive simplification causes a '
             'ring to self-intersect (fold over itself), this option detects and '
             'corrects the inversion by restoring a small number of original '
-            'vertices. Adds processing time on large datasets.'
+            'vertices. Adds processing time on large datasets. '
+            'It might be a good idea to ensure that the input layer is valid and does not contain overlapping polygons. '
+            'After the generalization, the output layer should be checked for validity and repaired if necessary.'
         )
 
     def icon(self):
