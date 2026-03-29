@@ -103,7 +103,7 @@ def compile_translations():
             capture_output=True, text=True,
         )
         if result.returncode == 0:
-            print(f"  Compiled {ts.name} → {qm.name}")
+            print(f"  Compiled {ts.name} -> {qm.name}")
         else:
             print(f"  ERROR compiling {ts.name}:\n{result.stderr}")
             sys.exit(1)

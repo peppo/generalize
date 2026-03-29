@@ -32,8 +32,7 @@ about[de]=Reduziert die Stützpunktanzahl von Polygonlayern unter Beibehaltung d
 
     Gemeinsame Grenzen benachbarter Polygone werden genau einmal vereinfacht, sodass
     beide Nachbarn stets dieselbe vereinfachte Kante erhalten. Dadurch entstehen
-    garantiert keine Splitter, Lücken oder Überlappungen — eine Eigenschaft, die die
-    meisten Standard-Vereinfachungswerkzeuge nicht bieten.
+    garantiert keine Lücken oder Überlappungen.
 
     Der Algorithmus basiert auf der gewichteten Visvalingam-Whyatt-Methode, wie sie in
     MapShaper (mbloch/mapshaper) verwendet wird. Dreiecksflächen werden nach dem Winkel
