@@ -43,7 +43,18 @@ class GeneralizeAlgorithm(QgsProcessingAlgorithm):
         return (
             'Simplifies polygon boundaries using the topology-aware Visvalingam '
             'algorithm. Shared edges between adjacent polygons are simplified '
-            'exactly once, so no slivers or gaps are introduced between neighbours.'
+            'exactly once, so no slivers or gaps are introduced between neighbours.\n\n'
+            '<b>Reduction percentage</b>: how aggressively to simplify. '
+            '90 % removes 90 % of the vertices. Higher values produce coarser '
+            'output; lower values stay closer to the original shape.\n\n'
+            '<b>Dissolve small parts and holes</b>: after simplification, removes '
+            'polygon parts and holes whose area falls below an automatic threshold '
+            '(2 × average segment length²). Useful for cleaning up tiny slivers '
+            'or island artefacts. At least one part per feature is always kept.\n\n'
+            '<b>Repair ring inversions</b>: if aggressive simplification causes a '
+            'ring to self-intersect (fold over itself), this option detects and '
+            'corrects the inversion by restoring a small number of original '
+            'vertices. Adds processing time on large datasets.'
         )
 
     def icon(self):
