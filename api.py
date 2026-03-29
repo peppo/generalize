@@ -178,7 +178,11 @@ def generalize_polygon_layer(
         if repair_inversions:
             _set_progress(W_TOPO + W_SIMP)
             t_ir = time.perf_counter()
-            n_repairs, n_invalid = repair_ring_inversions(topo, original_edge_coords)
+            def _repair_progress(pct):
+                _set_progress(W_TOPO + W_SIMP + W_REPAIR * pct / 100.0)
+            n_repairs, n_invalid = repair_ring_inversions(
+                topo, original_edge_coords, progress_callback=_repair_progress
+            )
             _set_progress(W_TOPO + W_SIMP + W_REPAIR)
             _log(f"Inversion repair: {n_invalid} ring(s) needed repair, "
                  f"{n_repairs} action(s) taken in {time.perf_counter() - t_ir:.1f}s")

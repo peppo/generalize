@@ -947,6 +947,7 @@ def repair_ring_inversions(
     topo: TopoLayer,
     original_edge_coords: dict[int, np.ndarray],
     max_attempts: int = 5,
+    progress_callback=None,
 ) -> int:
     """
     Detect self-intersecting outer rings caused by over-simplification and
@@ -979,9 +980,12 @@ def repair_ring_inversions(
     # the previous pass; None means "check everything" (first pass).
     dirty_edges: set[int] | None = None
 
+    n_polys = len(topo.polygons)
     for attempt in range(max_attempts):
         invalid_rings = []
-        for pid, poly in topo.polygons.items():
+        for i, (pid, poly) in enumerate(topo.polygons.items()):
+            if attempt == 0 and progress_callback is not None and n_polys > 0:
+                progress_callback(100.0 * i / n_polys)
             for ring in [poly.outer_ring] + poly.inner_rings:
                 # Skip rings that share no dirty edges (optimization: only on
                 # passes after the first, when we know which edges changed).
