@@ -15,7 +15,14 @@ class GeneralizePlugin:
         self.action.triggered.connect(self.run)
         self.iface.vectorMenu().addAction(self.action)
 
+        from .processing_provider import GeneralizeProvider
+        from qgis.core import QgsApplication
+        self._provider = GeneralizeProvider()
+        QgsApplication.processingRegistry().addProvider(self._provider)
+
     def unload(self):
+        from qgis.core import QgsApplication
+        QgsApplication.processingRegistry().removeProvider(self._provider)
         self.iface.vectorMenu().removeAction(self.action)
 
     def run(self):

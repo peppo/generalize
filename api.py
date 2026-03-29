@@ -98,11 +98,11 @@ def generalize_polygon_layer(
     else:
         layer = input_layer
 
-    # Progress weights based on measured timing on gemeinden_mittelfranken (50%):
+    # Progress weights based on measured timing on gemeinden_bayern (50%):
     #   without repair_inversions: topology 96 %, simplification  3 %, reconstruction 1 %
-    #   with    repair_inversions: topology 32 %, simplification  2 %, repair 65 %, reconstruction 1 %
+    #   with    repair_inversions: topology 33 %, simplification  1 %, repair 65 %, reconstruction 1 %
     if repair_inversions:
-        W_TOPO, W_SIMP, W_REPAIR = 32.0, 2.0, 65.0
+        W_TOPO, W_SIMP, W_REPAIR = 33.0, 1.0, 65.0
     else:
         W_TOPO, W_SIMP, W_REPAIR = 96.0, 3.0,  0.0
 

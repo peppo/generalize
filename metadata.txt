@@ -23,5 +23,8 @@ about=Reduces the vertex count of polygon layers while preserving shape and topo
     centre vertex, so nearly-collinear points are removed first while
     geometrically significant vertices are protected.
 
+    You can find the button in QGIS in the menu Vector > Generalize Polygons... 
+    or use the tools panel.
+
 [processing]
-hasProcessingProvider=no
+hasProcessingProvider=yes
