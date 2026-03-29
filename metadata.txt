@@ -1,6 +1,8 @@
 [general]
 name=Generalize Polygons
+name[de]=Polygone generalisieren
 description=Topology-preserving polygon simplification using the weighted Visvalingam algorithm — no slivers, no gaps.
+description[de]=Topologieerhaltende Polygonvereinfachung mit dem gewichteten Visvalingam-Algorithmus — keine Splitter, keine Lücken.
 version=0.6.1-SNAPSHOT
 qgisMinimumVersion=3.40
 qgisMaximumVersion=4.99
@@ -23,8 +25,23 @@ about=Reduces the vertex count of polygon layers while preserving shape and topo
     centre vertex, so nearly-collinear points are removed first while
     geometrically significant vertices are protected.
 
-    You can find the button in QGIS in the menu Vector > Generalize Polygons... 
+    You can find the button in QGIS in the menu Vector > Generalize Polygons...
     or use the tools panel.
+
+about[de]=Reduziert die Stützpunktanzahl von Polygonlayern unter Beibehaltung der Form und Topologie.
+
+    Gemeinsame Grenzen benachbarter Polygone werden genau einmal vereinfacht, sodass
+    beide Nachbarn stets dieselbe vereinfachte Kante erhalten. Dadurch entstehen
+    garantiert keine Splitter, Lücken oder Überlappungen — eine Eigenschaft, die die
+    meisten Standard-Vereinfachungswerkzeuge nicht bieten.
+
+    Der Algorithmus basiert auf der gewichteten Visvalingam-Whyatt-Methode, wie sie in
+    MapShaper (mbloch/mapshaper) verwendet wird. Dreiecksflächen werden nach dem Winkel
+    am Mittelscheitelpunkt gewichtet, sodass nahezu kollineare Punkte zuerst entfernt
+    werden, während geometrisch bedeutsame Stützpunkte erhalten bleiben.
+
+    Die Schaltfläche ist in QGIS im Menü Vektor > Polygone generalisieren... zu finden
+    oder über das Werkzeugfenster.
 
 [processing]
 hasProcessingProvider=yes
