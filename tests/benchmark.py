@@ -1,8 +1,20 @@
 """
 Performance benchmark for the topological generalisation pipeline.
 
+Purpose
+-------
+This script measures the wall-clock contribution of each pipeline phase
+(topology build, simplification, reconstruction) on the gemeinden_bayern
+dataset.  The resulting per-phase percentages are used to calibrate the
+progress-bar weight constants W_TOPO / W_SIMP / W_REPAIR in api.py.
+
 Run:
     "C:\\Program Files\\QGIS 3.40.15\\apps\\Python312\\python.exe" tests/benchmark.py
+
+Note: this script does not run the repair passes (repair_ring_inversions /
+repair_inter_polygon_crossings).  To time those, use measure_performance.py
+which runs the full generalize_polygon_layer() pipeline including repair and
+prints a phase-by-phase log.
 """
 import os
 import sys
