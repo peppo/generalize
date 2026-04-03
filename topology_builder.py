@@ -1191,19 +1191,31 @@ def _build_topology(
     progress_callback=None,
 ) -> None:
     """
-    Core routine.  Iterates every ring in two passes:
+    Core routine.  Iterates every ring in three passes:
 
     Pass A – For each ring, detect arc boundaries (positions where the set of
-             sharing-partner rings changes), split the ring into arcs, and
-             create or look up the corresponding TopoEdge.
+             sharing-partner rings changes) and record arc_starts.
 
-    Pass B – Group rings by (feature_id, part_index) to form TopoPolygon
+    Pass A.5 – Propagate junction coordinates: any coord that is an arc_start
+               in some ring must also be an arc_start in every other ring that
+               contains it.  Without this step, a small ring whose entire
+               boundary is shared with a single larger ring produces only one
+               arc_start (at the n-way junction), yielding a self-loop that
+               cannot match the larger ring's open arcs.
+
+    Pass B – Split each ring into arcs using the augmented arc_starts,
+             create or look up TopoEdge objects, assemble TopoRings.
+
+    Pass C – Group rings by (feature_id, part_index) to form TopoPolygon
              objects, then set left/right polygon ownership on each edge.
     """
     snap_tol = topo.snap_tolerance
     ring_meta: dict[int, dict] = {}
 
-    # --- Pass A: build TopoEdges and TopoRings ---
+    # --- Pass A: compute sharing values and arc_starts for every ring ---
+    # (no TopoEdge creation yet — we need all arc_starts before propagating)
+    all_arc_starts: dict[int, list[int]] = {}   # ring_id → sorted arc_start list
+
     total_rings = len(raw_rings)
     for ring_idx, ring in enumerate(raw_rings):
         ring_id = ring['ring_id']
@@ -1280,6 +1292,48 @@ def _build_topology(
                 arc_starts.append(i)
         arc_starts = sorted(set(arc_starts))
 
+        all_arc_starts[ring_id] = arc_starts
+
+    # --- Pass A.5: propagate junction coordinates across rings ---
+    #
+    # Problem: a ring R_small whose entire boundary is shared with a single
+    # larger ring R_large has a constant sharing value throughout (e.g.
+    # sharing=R_large_id at every coord).  Its only arc_start comes from the
+    # one n-way junction where a third ring also touches the boundary.
+    # R_large, however, has additional arc_starts at the points where it
+    # *enters* and *exits* the R_small-shared section — points that are just
+    # ordinary shared coords from R_small's perspective (no sharing change).
+    # Result: R_small produces one self-loop arc; R_large produces shorter
+    # open arcs.  Their canonical keys never match → shared arc undetected.
+    #
+    # Fix: collect all arc_start coordinates across every ring ("junction
+    # coords"), then add any junction coord that appears in a ring's own coord
+    # list as an extra arc_start for that ring.  This ensures both rings agree
+    # on where arc boundaries lie.
+    junction_coords: set[tuple] = set()
+    for ring in raw_rings:
+        ring_id = ring['ring_id']
+        coords  = ring['coords']
+        for i in all_arc_starts[ring_id]:
+            junction_coords.add(coords[i])
+
+    for ring in raw_rings:
+        ring_id = ring['ring_id']
+        coords  = ring['coords']
+        existing = set(all_arc_starts[ring_id])
+        extra = [
+            i for i, c in enumerate(coords)
+            if c in junction_coords and i not in existing
+        ]
+        if extra:
+            all_arc_starts[ring_id] = sorted(existing | set(extra))
+
+    # --- Pass B: build TopoEdges and TopoRings using the final arc_starts ---
+    for ring_idx, ring in enumerate(raw_rings):
+        ring_id = ring['ring_id']
+        coords  = ring['coords']
+        arc_starts = all_arc_starts[ring_id]
+
         arcs = _split_into_arcs(coords, arc_starts)
 
         topo_ring = TopoRing()
@@ -1299,7 +1353,7 @@ def _build_topology(
         if progress_callback:
             progress_callback(ring_idx + 1, total_rings)
 
-    # --- Pass B: assemble TopoPolygons and set edge ownership ---
+    # --- Pass C: assemble TopoPolygons and set edge ownership ---
     poly_groups: dict[tuple, dict] = defaultdict(
         lambda: {'outer': None, 'holes': [], 'attrs': None, 'is_multipart': False}
     )
