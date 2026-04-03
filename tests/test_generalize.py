@@ -970,6 +970,55 @@ class TestDissolveSmall(unittest.TestCase):
         )
 
 
+@pytest.mark.slow
+class TestDissolveSmallNoCollapse(unittest.TestCase):
+    """
+    dissolve_small=True at 96% reduction on gemeinden_bayern must not collapse
+    any polygon to an empty geometry.
+
+    At aggressive reduction rates the pre-simplification dissolve can remove
+    all parts of a MultiPolygon feature, leaving it with no geometry at all.
+    Every output feature must have at least one part with positive area.
+    """
+
+    PERCENTAGE = 96
+
+    @classmethod
+    def setUpClass(cls):
+        from generalize.api import generalize_polygon_layer
+        layer = _load_layer(_GEMEINDEN_BAYERN)
+        cls.input_count = layer.featureCount()
+        cls.features, _, _ = generalize_polygon_layer(
+            layer, percentage=cls.PERCENTAGE, add_to_project=False,
+            dissolve_small=True,
+        )
+
+    def test_no_collapsed_polygons(self):
+        """Every output feature must have a non-empty geometry with area > 0."""
+        collapsed = []
+        for f in self.features:
+            geom = f.geometry()
+            if geom is None or geom.isEmpty() or geom.area() <= 0:
+                idx = f.fieldNameIndex('gml_id')
+                fid = f.attribute(idx) if idx >= 0 else f.id()
+                name = f.attribute(f.fieldNameIndex('name')) or ''
+                collapsed.append(f'  {fid} ({name})')
+        self.assertEqual(
+            collapsed, [],
+            f'{len(collapsed)} feature(s) collapsed to empty geometry after '
+            f'{self.PERCENTAGE}% generalization with dissolve_small=True:\n'
+            + '\n'.join(collapsed),
+        )
+
+    def test_no_features_lost(self):
+        """Output must contain the same number of features as the input."""
+        self.assertEqual(
+            len(self.features), self.input_count,
+            f'Lost features after {self.PERCENTAGE}% generalization with '
+            f'dissolve_small=True: {self.input_count} in, {len(self.features)} out',
+        )
+
+
 class TestDialogSmoke(unittest.TestCase):
     """
     Smoke test: GeneralizeDialog can be constructed on the current Qt version.
