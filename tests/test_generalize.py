@@ -46,6 +46,7 @@ _TOO_FEW_POINTS         = os.path.join(_DATA_ROOT, 'too_few_points',         'to
 _SELF_INTERSECTION      = os.path.join(_DATA_ROOT, 'self_intersection',       'self_intersection.geojson')
 _SLIVER2               = os.path.join(_DATA_ROOT, 'sliver2',              'sliver2.geojson')
 _SLIVER3               = os.path.join(_DATA_ROOT, 'sliver3',              'sliver3.geojson')
+_LOST2                 = os.path.join(_DATA_ROOT, 'lost',                 'lost2.geojson')
 
 
 def _load_layer(path: str):
@@ -1027,6 +1028,55 @@ class TestDissolveSmallNoCollapse(unittest.TestCase):
         if unexpectedly_kept:
             msgs.append('Expected to be lost but still present: ' + ', '.join(sorted(unexpectedly_kept)))
         self.assertFalse(msgs, '\n'.join(msgs))
+
+
+class TestLost2NoHoleAfterUnion(unittest.TestCase):
+    """
+    Three adjacent municipalities (Burgwindheim, Winkelhofer Forst, Ebrach)
+    share borders.  After simplification with dissolve_small and repair_inversions
+    their union must be a single polygon with no holes — any sliver gap between
+    neighbours would appear as an interior ring in the union.
+    """
+
+    PERCENTAGE = 95
+
+    @classmethod
+    def setUpClass(cls):
+        from generalize.api import generalize_polygon_layer
+        from qgis.core import QgsGeometry
+        layer = _load_layer(_LOST2)
+        cls.features, _, _ = generalize_polygon_layer(
+            layer, percentage=cls.PERCENTAGE, add_to_project=False,
+            dissolve_small=True, repair_inversions=True,
+        )
+        geoms = [f.geometry() for f in cls.features]
+        cls.union = QgsGeometry.unaryUnion(geoms)
+
+    def test_union_has_no_holes(self):
+        """Union of all output polygons must contain no interior rings."""
+        from qgis.core import QgsWkbTypes
+        union = self.union
+        self.assertFalse(union.isNull(), 'Union geometry is null')
+        self.assertFalse(union.isEmpty(), 'Union geometry is empty')
+
+        holes = []
+        geom = union.constGet()
+        if QgsWkbTypes.isMultiType(union.wkbType()):
+            parts = [geom.geometryN(i) for i in range(geom.numGeometries())]
+        else:
+            parts = [geom]
+
+        for part in parts:
+            for ring_idx in range(1, part.numInteriorRings() + 1):
+                ring = part.interiorRing(ring_idx - 1)
+                holes.append(f'  ring with {ring.numPoints()} points')
+
+        self.assertEqual(
+            holes, [],
+            f'Union has {len(holes)} hole(s) after {self.PERCENTAGE}% '
+            f'generalization — shared borders are not topologically consistent:\n'
+            + '\n'.join(holes),
+        )
 
 
 class TestDialogSmoke(unittest.TestCase):
