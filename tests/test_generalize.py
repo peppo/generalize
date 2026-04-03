@@ -982,12 +982,17 @@ class TestDissolveSmallNoCollapse(unittest.TestCase):
     """
 
     PERCENTAGE = 96
+    # These tiny single-part municipalities consist entirely of parts below the
+    # dissolve threshold at 96% and are therefore intentionally removed.
+    EXPECTED_LOST = {'Geiersberg', 'Pröll'}
 
     @classmethod
     def setUpClass(cls):
         from generalize.api import generalize_polygon_layer
         layer = _load_layer(_GEMEINDEN_BAYERN)
         cls.input_count = layer.featureCount()
+        cls.name_idx = layer.fields().indexOf('name')
+        cls.input_names = {f.attribute(cls.name_idx) for f in layer.getFeatures()}
         cls.features, _, _ = generalize_polygon_layer(
             layer, percentage=cls.PERCENTAGE, add_to_project=False,
             dissolve_small=True,
@@ -1010,13 +1015,18 @@ class TestDissolveSmallNoCollapse(unittest.TestCase):
             + '\n'.join(collapsed),
         )
 
-    def test_no_features_lost(self):
-        """Output must contain the same number of features as the input."""
-        self.assertEqual(
-            len(self.features), self.input_count,
-            f'Lost features after {self.PERCENTAGE}% generalization with '
-            f'dissolve_small=True: {self.input_count} in, {len(self.features)} out',
-        )
+    def test_only_expected_features_lost(self):
+        """Exactly EXPECTED_LOST features may be absent from the output; no others."""
+        output_names = {f.attribute(self.name_idx) for f in self.features}
+        actually_lost = self.input_names - output_names
+        unexpected_lost = actually_lost - self.EXPECTED_LOST
+        unexpectedly_kept = self.EXPECTED_LOST - actually_lost
+        msgs = []
+        if unexpected_lost:
+            msgs.append('Unexpectedly lost: ' + ', '.join(sorted(unexpected_lost)))
+        if unexpectedly_kept:
+            msgs.append('Expected to be lost but still present: ' + ', '.join(sorted(unexpectedly_kept)))
+        self.assertFalse(msgs, '\n'.join(msgs))
 
 
 class TestDialogSmoke(unittest.TestCase):
