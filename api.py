@@ -126,8 +126,6 @@ def generalize_polygon_layer(
              f"{total_edges} edges, {total_vertices:,} vertices")
         _set_progress(W_TOPO)
 
-        edge_other_rings: dict[int, list] = {}
-
         # Snapshot original coords before simplification so repair_ring_inversions
         # can restore removed points if needed.
         original_edge_coords = {edge.id: edge.coords.copy() for edge in edges}
@@ -158,14 +156,11 @@ def generalize_polygon_layer(
         for i, edge in enumerate(edges):
             _set_progress(W_TOPO + W_SIMP * i / total_edges)
 
-            other_rings = edge_other_rings.get(edge.id, [])
             is_loop = (edge.start_node == edge.end_node)
             if is_loop:
-                edge.coords = simplify_polygon(edge.coords, percentage,                                               
-                                               other_rings=other_rings)
+                edge.coords = simplify_polygon(edge.coords, percentage)
             else:
-                edge.coords = simplify_arc(edge.coords, percentage,
-                                           other_rings=other_rings)
+                edge.coords = simplify_arc(edge.coords, percentage)
 
         _set_progress(W_TOPO + W_SIMP)
 
