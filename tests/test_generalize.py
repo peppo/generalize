@@ -48,6 +48,7 @@ _SLIVER2               = os.path.join(_DATA_ROOT, 'sliver2',              'slive
 _SLIVER3               = os.path.join(_DATA_ROOT, 'sliver3',              'sliver3.geojson')
 _LOST2                 = os.path.join(_DATA_ROOT, 'lost',                 'lost2.geojson')
 _LOST3                 = os.path.join(_DATA_ROOT, 'lost',                 'lost3.geojson')
+_INVERT5AT98           = os.path.join(_DATA_ROOT, 'invert',               'invert5at98.geojson')
 
 
 def _load_layer(path: str):
@@ -1133,6 +1134,53 @@ class TestLost3NoHoleAfterUnion(unittest.TestCase):
             holes, [],
             f'Union has {len(holes)} hole(s) after {self.PERCENTAGE}% '
             f'generalization with dissolve_small — shared borders are not topologically consistent:\n'
+            + '\n'.join(holes),
+        )
+
+
+class TestInvert5At98NoHoleAfterUnion(unittest.TestCase):
+    """
+    After 98% generalization with repair_inversions=True (no dissolve_small),
+    the union of all output polygons must contain no interior rings.
+    """
+
+    PERCENTAGE = 98
+
+    @classmethod
+    def setUpClass(cls):
+        from generalize.api import generalize_polygon_layer
+        from qgis.core import QgsGeometry
+        layer = _load_layer(_INVERT5AT98)
+        cls.features, _, _ = generalize_polygon_layer(
+            layer, percentage=cls.PERCENTAGE, add_to_project=False,
+            dissolve_small=False,
+            repair_inversions=True,
+        )
+        cls.union = QgsGeometry.unaryUnion([f.geometry() for f in cls.features])
+
+    def test_union_has_no_holes(self):
+        """Union of all output polygons must contain no interior rings."""
+        from qgis.core import QgsWkbTypes
+        union = self.union
+        self.assertFalse(union.isNull(), 'Union geometry is null')
+        self.assertFalse(union.isEmpty(), 'Union geometry is empty')
+
+        holes = []
+        geom = union.constGet()
+        if QgsWkbTypes.isMultiType(union.wkbType()):
+            parts = [geom.geometryN(i) for i in range(geom.numGeometries())]
+        else:
+            parts = [geom]
+
+        for part in parts:
+            for ring_idx in range(1, part.numInteriorRings() + 1):
+                ring = part.interiorRing(ring_idx - 1)
+                holes.append(f'  ring with {ring.numPoints()} points')
+
+        self.assertEqual(
+            holes, [],
+            f'Union has {len(holes)} hole(s) after {self.PERCENTAGE}% '
+            f'generalization with repair_inversions — shared borders are not topologically consistent:\n'
             + '\n'.join(holes),
         )
 
