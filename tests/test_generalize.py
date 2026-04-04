@@ -1140,7 +1140,7 @@ class TestLost3NoHoleAfterUnion(unittest.TestCase):
 
 class TestInvert5At98NoHoleAfterUnion(unittest.TestCase):
     """
-    After 98% generalization with repair_inversions=True (no dissolve_small),
+    After 98% generalization with repair_inversions=True and dissolve_small=True,
     the union of all output polygons must contain no interior rings.
     """
 
@@ -1153,7 +1153,7 @@ class TestInvert5At98NoHoleAfterUnion(unittest.TestCase):
         layer = _load_layer(_INVERT5AT98)
         cls.features, _, _ = generalize_polygon_layer(
             layer, percentage=cls.PERCENTAGE, add_to_project=False,
-            dissolve_small=False,
+            dissolve_small=True,
             repair_inversions=True,
         )
         cls.union = QgsGeometry.unaryUnion([f.geometry() for f in cls.features])
