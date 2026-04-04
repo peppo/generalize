@@ -39,7 +39,7 @@ class _GeneralizeTask(QgsTask):
         self.repair_inversions = repair_inversions
         # Capture layer metadata on the main thread before the task starts.
         self.crs_authid = layer.crs().authid()
-        suffixes = ['generalized', str(percentage)]
+        suffixes = ['generalized', f'{percentage:.3g}']
         if dissolve_small:
             suffixes.append('island')
         if repair_inversions:
