@@ -47,6 +47,7 @@ _SELF_INTERSECTION      = os.path.join(_DATA_ROOT, 'self_intersection',       's
 _SLIVER2               = os.path.join(_DATA_ROOT, 'sliver2',              'sliver2.geojson')
 _SLIVER3               = os.path.join(_DATA_ROOT, 'sliver3',              'sliver3.geojson')
 _LOST2                 = os.path.join(_DATA_ROOT, 'lost',                 'lost2.geojson')
+_LOST3                 = os.path.join(_DATA_ROOT, 'lost',                 'lost3.geojson')
 
 
 def _load_layer(path: str):
@@ -540,7 +541,6 @@ class TestGemeindenBayernNoSliver(unittest.TestCase):
 class TestSliver2NoSliver(unittest.TestCase):
     """
     Regression test for the Haidmühle/Grainet Forest area.
-
     """
 
     PERCENTAGE = 90
@@ -553,14 +553,7 @@ class TestSliver2NoSliver(unittest.TestCase):
             layer, percentage=cls.PERCENTAGE, add_to_project=False,
         )
 
-    @unittest.expectedFailure
     def test_no_sliver(self):
-        # The municipality and forest-district boundaries were digitised from
-        # different sources with coordinate mismatches of several metres.
-        # The topology builder cannot detect shared edges across sources, so
-        # both sides are simplified independently and overlaps appear.
-        # Expected to fail until the input is pre-snapped or the algorithm
-        # handles non-topological shared boundaries.
         slivers = TestGemeindenBayernNoSliver._find_slivers(self.features)
         self.assertEqual(
             slivers, [],
@@ -679,7 +672,7 @@ class TestUntrasriedValidGeometry(unittest.TestCase):
     constraint is exercised.
     """
 
-    PERCENTAGE = 50
+    PERCENTAGE = 80
 
     @classmethod
     def setUpClass(cls):
@@ -1075,6 +1068,71 @@ class TestLost2NoHoleAfterUnion(unittest.TestCase):
             holes, [],
             f'Union has {len(holes)} hole(s) after {self.PERCENTAGE}% '
             f'generalization — shared borders are not topologically consistent:\n'
+            + '\n'.join(holes),
+        )
+
+
+class TestLost3NoHoleAfterUnion(unittest.TestCase):
+    """
+    After simplification with dissolve_small=True at 98%, the union of all
+    output polygons must contain no interior rings (no sliver gaps).
+    """
+
+    PERCENTAGE = 98
+
+    @classmethod
+    def setUpClass(cls):
+        from generalize.api import generalize_polygon_layer
+        from qgis.core import QgsGeometry
+        layer = _load_layer(_LOST3)
+        cls.features_dissolve, _, _ = generalize_polygon_layer(
+            layer, percentage=cls.PERCENTAGE, add_to_project=False,
+            dissolve_small=True,
+        )
+        cls.features_no_dissolve, _, _ = generalize_polygon_layer(
+            layer, percentage=cls.PERCENTAGE, add_to_project=False,
+            dissolve_small=False,
+        )
+        cls.union_dissolve = QgsGeometry.unaryUnion([f.geometry() for f in cls.features_dissolve])
+        cls.union_no_dissolve = QgsGeometry.unaryUnion([f.geometry() for f in cls.features_no_dissolve])
+
+    @staticmethod
+    def _count_holes(union):
+        from qgis.core import QgsWkbTypes
+        holes = []
+        geom = union.constGet()
+        if QgsWkbTypes.isMultiType(union.wkbType()):
+            parts = [geom.geometryN(i) for i in range(geom.numGeometries())]
+        else:
+            parts = [geom]
+        for part in parts:
+            for ring_idx in range(1, part.numInteriorRings() + 1):
+                ring = part.interiorRing(ring_idx - 1)
+                holes.append(f'  ring with {ring.numPoints()} points')
+        return holes
+
+    def test_union_no_dissolve_has_no_holes(self):
+        """Without dissolve_small the topology alone must produce no holes."""
+        union = self.union_no_dissolve
+        self.assertFalse(union.isNull(), 'Union geometry is null')
+        self.assertFalse(union.isEmpty(), 'Union geometry is empty')
+        holes = self._count_holes(union)
+        self.assertEqual(
+            holes, [],
+            f'Union (no dissolve) has {len(holes)} hole(s) after {self.PERCENTAGE}% '
+            f'generalization:\n' + '\n'.join(holes),
+        )
+
+    def test_union_has_no_holes(self):
+        """Union of all output polygons (dissolve_small=True) must contain no interior rings."""
+        union = self.union_dissolve
+        self.assertFalse(union.isNull(), 'Union geometry is null')
+        self.assertFalse(union.isEmpty(), 'Union geometry is empty')
+        holes = self._count_holes(union)
+        self.assertEqual(
+            holes, [],
+            f'Union has {len(holes)} hole(s) after {self.PERCENTAGE}% '
+            f'generalization with dissolve_small — shared borders are not topologically consistent:\n'
             + '\n'.join(holes),
         )
 
