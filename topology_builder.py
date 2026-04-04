@@ -471,7 +471,9 @@ def dissolve_small_rings(topo: TopoLayer, threshold: float | None = None) -> tup
                     frozenset(eid for eid, _ in hole.half_edges)
                 )
                 if twin_pid is not None:
-                    pids_to_remove.add(twin_pid)
+                    twin_fid = topo.polygons[twin_pid].feature_id
+                    if len(feature_pids[twin_fid]) > 1:
+                        pids_to_remove.add(twin_pid)
 
     # --- Phase 2: small outer rings not already removed ----------------------
     # Sort smallest-first so the smallest parts are dropped first; the

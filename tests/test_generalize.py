@@ -958,10 +958,13 @@ class TestDissolveSmall(unittest.TestCase):
         )
 
     def test_dissolve_small_at_least_one_part_per_feature(self):
-        """Every feature must have at least one remaining polygon part."""
-        self.assertGreater(
-            len(self.features_dissolved), 0,
-            'All features were dissolved — at least one must remain.',
+        """Every input feature must appear in the output with at least one part."""
+        input_fids = {f.id() for f in _load_layer(_TOO_FEW_POINTS).getFeatures()}
+        output_fids = {f.id() for f in self.features_dissolved}
+        missing = input_fids - output_fids
+        self.assertEqual(
+            missing, set(),
+            f'dissolve_small=True dropped entire feature(s): {missing}',
         )
 
 
