@@ -887,10 +887,18 @@ def _drop_small_loop(
     for k, (he_idx, _) in enumerate(ring_to_edge):
         he_ring_positions.setdefault(he_idx, set()).add(k)
 
+    # Never remove a shared half-edge (one that borders a neighbouring polygon)
+    # from ring.half_edges: the neighbour still owns that edge, and removing it
+    # from only this ring creates a spatial gap (hole in the union).  Only loop
+    # edges (where one side is exterior / None) can safely be eliminated.
     he_to_remove = {
         he_idx
         for he_idx, positions in he_ring_positions.items()
         if positions.issubset(small_set)
+        and (
+            edges[ring.half_edges[he_idx][0]].left_polygon is None
+            or edges[ring.half_edges[he_idx][0]].right_polygon is None
+        )
     }
     if he_to_remove:
         ring.half_edges = [
